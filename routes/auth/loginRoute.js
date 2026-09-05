@@ -7,8 +7,8 @@ const { refreshTokenHandler } = require("../../controller/auth/refreshTokenContr
 const { loginLimiter, refreshLimiter } = require("../../middleware/rateLimit");
 const router = express.Router();
 
-router.post("/login", loginLimiter, handleLogin);
-router.post("/refresh", refreshLimiter, refreshTokenHandler);
-router.post("/logout", handleLogout);
+router.post("/auth/login", loginLimiter, handleLogin);
+router.post("/auth/refresh", refreshLimiter, refreshTokenHandler);
+router.post("/auth/logout", handleLogout);
 
 module.exports = router;
