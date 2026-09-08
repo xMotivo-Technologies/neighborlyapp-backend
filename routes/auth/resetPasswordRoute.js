@@ -8,8 +8,8 @@ const {
 const { passwordResetRequestLimiter } = require("../../middleware/rateLimit");
 const router = express.Router();
 
-router.post("/forgot-password", passwordResetRequestLimiter, forgotPassword);
-router.post("/verify-otp", verifyOtp);
-router.post("/reset-password", resetPassword);
+router.post("/auth/password-reset/request", passwordResetRequestLimiter, forgotPassword);
+router.post("/auth/verify-otp", verifyOtp);
+router.post("/auth/password-reset/confirm", resetPassword);
 
 module.exports = router;
