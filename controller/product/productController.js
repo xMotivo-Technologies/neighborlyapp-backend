@@ -88,6 +88,7 @@ const createProduct = async (req, res) => {
 const editProduct = async (req, res) => {
   const { id } = req.params;
   const { name, desc, price, category, location, condition, lat, lng } = req.body;
+  console.log("body:", req.body);
 
   try {
     const product = await ProductModel.findById(id);
