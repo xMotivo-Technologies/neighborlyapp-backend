@@ -184,6 +184,28 @@ const getAllProducts = async (req, res) => {
   }
 };
 
+const getMyProducts = async (req, res) => {
+  try {
+    const { page, limit, skip } = getPagination(req.query);
+    const filter = { vendor: req.user._id };
+
+    const [products, total] = await Promise.all([
+      ProductModel.find(filter)
+        .populate("vendor", "businessName businessAddress")
+        .skip(skip)
+        .limit(limit),
+      ProductModel.countDocuments(filter),
+    ]);
+    return res.status(200).json({
+      data: products,
+      pagination: buildPaginationMeta({ page, limit, total }),
+    });
+  } catch (error) {
+    console.error("Get my products error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+}; 
+
 const getProductsByCategory = async (req, res) => {
   const { categoryName } = req.params;
 
@@ -459,6 +481,7 @@ module.exports = {
   editProduct,
   updateProductStatus,
   getAllProducts,
+  getMyProducts,
   getProductsByCategory,
   getNearbyProducts,
   searchProducts,

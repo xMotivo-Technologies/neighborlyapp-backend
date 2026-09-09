@@ -13,6 +13,7 @@ const {
   getRecommendations,
   getProductById,
   getRecentlyViewed,
+  getMyProducts,
 } = require("../../controller/product/productController");
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.post("/newproduct", authToken, isVendor, upload.array("images", 6), creat
 router.put("/editproduct/:id", authToken, isVendor, upload.array("images", 6), editProduct);
 router.put("/products/:id/status", authToken, isVendor, updateProductStatus);
 router.get("/allproducts", getAllProducts);
+router.get("/myproducts", authToken, getMyProducts);
 router.get("/categories/:categoryName", getProductsByCategory);
 router.get("/products/nearby", getNearbyProducts);
 router.get("/products/search", searchProducts);
