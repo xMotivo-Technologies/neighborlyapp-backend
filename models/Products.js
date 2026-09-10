@@ -7,10 +7,10 @@ const ProductSchema = new Schema(
     desc: { type: String, required: true },
     imgUrl: { type: [String], required: true },
 
-    price: { type: Number, required: true, min: [0] }, //this means proce cannot be less than zero
+    price: { type: Number, required: true, min: [0] }, 
     category: {
       type: String,
-      ref: "CategoryModel", // Reference to a Category model
+      ref: "CategoryModel", 
       // required: true,
     },
     location: { type: String, required: true },
@@ -25,7 +25,7 @@ const ProductSchema = new Schema(
     },
     vendor: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User", // Reference to a Vendor (User model)
+      ref: "User",
       required: true,
     },
     status: {

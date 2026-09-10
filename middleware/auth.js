@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const AdminModel = require("../models/admin");
 const userModel = require("../models/User");
+const RiderModel = require("../models/Rider");
 require('dotenv').config();
 
 const verifyAdmin = async (req, res, next) => {
@@ -74,6 +75,28 @@ const isVendor = (req, res, next) => {
   next();
 };
 
+// Requires authToken to have run first (needs req.user). Checked against the
+// Rider collection (not req.user.role) so a rider application doesn't clash
+// with an existing vendor role on the same account. Attaches req.rider.
+const isRider = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  try {
+    const rider = await RiderModel.findOne({ user: req.user._id, status: "approved" });
+
+    if (!rider) {
+      return res.status(403).json({ message: "Approved rider access required" });
+    }
+
+    req.rider = rider;
+    next();
+  } catch (err) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 // const authToken = async (req, res, next) => {
 //   const token = req.cookies.token;  
 
@@ -93,4 +116,4 @@ const isVendor = (req, res, next) => {
 //   }
 // }
 
-module.exports = {verifyAdmin, authToken, optionalAuth, isVendor};
+module.exports = {verifyAdmin, authToken, optionalAuth, isVendor, isRider};

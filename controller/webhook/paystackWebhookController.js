@@ -1,0 +1,66 @@
+const crypto = require("crypto");
+const WithdrawalModel = require("../../models/Withdrawal");
+const { applyWalletEntry } = require("../../utils/walletLedger");
+
+const TERMINAL_STATUSES = ["approved", "rejected", "failed"];
+
+const finalizeWithdrawalTransfer = async (reference, outcome, paystackData) => {
+  if (!reference) return;
+
+  const withdrawal = await WithdrawalModel.findOne({ transferReference: reference });
+  if (!withdrawal || TERMINAL_STATUSES.includes(withdrawal.status)) return; // already finalized
+
+  withdrawal.paystackStatus = paystackData.status;
+  withdrawal.transferCode = paystackData.transfer_code || withdrawal.transferCode;
+
+  if (outcome === "success") {
+    withdrawal.status = "approved";
+    await withdrawal.save();
+    return;
+  }
+
+  await applyWalletEntry({
+    riderId: withdrawal.rider,
+    type: "credit",
+    amount: withdrawal.amount,
+    reason: "withdrawal_reversal",
+    idempotencyKey: `withdrawal_reversal_${withdrawal._id}`,
+    withdrawal: withdrawal._id,
+  });
+
+  withdrawal.status = "failed";
+  withdrawal.failureReason = paystackData.message || "Transfer failed";
+  await withdrawal.save();
+};
+
+// Requires req.rawBody (captured by the express.json verify callback in
+// index.js) since signature verification needs the exact bytes Paystack sent.
+const handlePaystackWebhook = async (req, res) => {
+  const signature = req.headers["x-paystack-signature"];
+  const expectedSignature = crypto
+    .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY)
+    .update(req.rawBody || Buffer.from(""))
+    .digest("hex");
+
+  if (!signature || signature !== expectedSignature) {
+    return res.status(401).json({ message: "Invalid signature" });
+  }
+
+  // Acknowledge immediately; Paystack retries on non-2xx and we don't want a
+  // slow/failed downstream write to trigger duplicate webhook delivery storms.
+  res.status(200).json({ received: true });
+
+  const event = req.body;
+
+  try {
+    if (event.event === "transfer.success") {
+      await finalizeWithdrawalTransfer(event.data.reference, "success", event.data);
+    } else if (event.event === "transfer.failed" || event.event === "transfer.reversed") {
+      await finalizeWithdrawalTransfer(event.data.reference, "failed", event.data);
+    }
+  } catch (error) {
+    console.error("Paystack webhook processing error:", error);
+  }
+};
+
+module.exports = { handlePaystackWebhook };

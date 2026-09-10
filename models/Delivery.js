@@ -1,0 +1,73 @@
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+
+const DELIVERY_STATUSES = ["pending", "accepted", "picked_up", "in_transit", "delivered", "confirmed"];
+
+const DeliverySchema = new Schema(
+  {
+    order: {
+      type: Schema.Types.ObjectId,
+      ref: "Order",
+      required: true,
+      unique: true,
+    },
+    vendor: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    buyer: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    rider: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    pickupAddress: { type: String, required: true },
+    pickupCoords: {
+      type: {
+        type: String,
+        enum: ["Point"],
+      },
+      coordinates: {
+        type: [Number], // [lng, lat]
+      },
+    },
+    dropoffAddress: { type: String, required: true },
+    dropoffCoords: {
+      type: {
+        type: String,
+        enum: ["Point"],
+      },
+      coordinates: {
+        type: [Number], // [lng, lat]
+      },
+    },
+
+    distanceKm: { type: Number },
+    fee: { type: Number },
+    estimatedDurationMinutes: { type: Number },
+
+    status: {
+      type: String,
+      enum: DELIVERY_STATUSES,
+      default: "pending",
+    },
+    acceptedAt: { type: Date },
+    pickedUpAt: { type: Date },
+    deliveredAt: { type: Date },
+    confirmedAt: { type: Date },
+  },
+  { timestamps: true },
+);
+
+DeliverySchema.index({ pickupCoords: "2dsphere" });
+DeliverySchema.index({ status: 1, rider: 1 });
+
+const DeliveryModel = mongoose.models.Delivery || mongoose.model("Delivery", DeliverySchema);
+
+module.exports = DeliveryModel;
