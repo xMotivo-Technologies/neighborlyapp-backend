@@ -24,6 +24,15 @@ const handleLogin = async (req, res) => {
     if (userDoc.isDeleted) {
       return res.status(403).json({ message: "Account has been deleted" });
     }
+
+    if (userDoc.status === "suspended") {
+      return res.status(403).json({ message: "Account suspended" });
+    }
+
+    if (userDoc.status === "banned") {
+      return res.status(403).json({ message: "Account banned" });
+    }
+
     const isMatch = await bcrypt.compare(password, userDoc.hashPass);
 
     if (!isMatch) {

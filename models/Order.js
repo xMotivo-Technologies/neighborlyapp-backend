@@ -25,7 +25,10 @@ const OrderSchema = new Schema(
 
     quantity: { type: Number, required: true, min: 1, default: 1 },
     unitPrice: { type: Number, required: true, min: 0 },
+    // totalAmount = (unitPrice * quantity) + deliveryFee — the exact figure charged via Paystack.
     totalAmount: { type: Number, required: true, min: 0 },
+    deliveryFee: { type: Number, required: true, min: 0 },
+    deliveryDistanceKm: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "NGN" },
 
     status: {
@@ -44,9 +47,10 @@ const OrderSchema = new Schema(
     cancelledAt: { type: Date },
     cancelReason: { type: String },
 
-    // Optional buyer-supplied delivery destination. Presence of deliveryAddress
-    // is what triggers auto-creation of a Delivery once payment succeeds.
-    deliveryAddress: { type: String },
+    // Delivery is mandatory on every order — the buyer's supplied destination,
+    // used both to charge the delivery fee up front and, once payment is
+    // verified, to create the Delivery a rider will pick up.
+    deliveryAddress: { type: String, required: true },
     deliveryCoords: {
       type: {
         type: String,

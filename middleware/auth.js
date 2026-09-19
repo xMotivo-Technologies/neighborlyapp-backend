@@ -38,6 +38,13 @@ const authToken = async (req, res, next) => {
     const user = await userModel.findById(decoded.id);
     if (!user) return res.status(401).json({ message: "User not found" });
 
+    // Enforced here, not just at login — an admin suspending/banning/deleting
+    // a user must take effect on their very next request, not just block
+    // future logins while an already-issued token keeps working.
+    if (user.isDeleted) return res.status(401).json({ message: "Account has been deleted" });
+    if (user.status === "suspended") return res.status(403).json({ message: "Account suspended" });
+    if (user.status === "banned") return res.status(403).json({ message: "Account banned" });
+
     req.user = user;
     next();
   } catch (err) {
@@ -46,7 +53,8 @@ const authToken = async (req, res, next) => {
 };
 
 // Like authToken, but never rejects — sets req.user when a valid token is
-// present, otherwise just calls next() so public routes stay public.
+// present, otherwise just calls next() so public routes stay public. A
+// deleted/suspended/banned user is treated as anonymous rather than erroring.
 const optionalAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -59,7 +67,7 @@ const optionalAuth = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await userModel.findById(decoded.id);
-    if (user) req.user = user;
+    if (user && !user.isDeleted && user.status === "active") req.user = user;
   } catch (err) {
     // invalid/expired token -> treat as anonymous
   }

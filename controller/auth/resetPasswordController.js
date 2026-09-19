@@ -4,6 +4,24 @@ const resetPasswordMail = require("../../utils/emails/resetPasswordMail");
 const resetPasswordSuccessMail = require("../../utils/emails/resetPasswordSuccessMail");
 const bcrypt = require("bcrypt");
 
+// Shared by self-service forgotPassword and the admin-triggered reset
+// (controller/admin/userController.js) — same OTP + email flow either way,
+// so an admin never sets or even sees the user's new password directly.
+const sendPasswordResetOtp = async (userDoc) => {
+  const resetCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+  const hashedCode = crypto
+    .createHash("sha256")
+    .update(resetCode)
+    .digest("hex");
+
+  userDoc.otp = hashedCode;
+  userDoc.resetCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+  await userDoc.save();
+  await resetPasswordMail({ email: userDoc.email, otp: resetCode });
+};
+
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
   try {
@@ -13,18 +31,7 @@ const forgotPassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const resetCode = Math.floor(1000 + Math.random() * 9000).toString();
-
-    const hashedCode = crypto
-      .createHash("sha256")
-      .update(resetCode)
-      .digest("hex");
-
-    userDoc.otp = hashedCode;
-    userDoc.resetCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-    await userDoc.save();
-    await resetPasswordMail({ email: userDoc.email, otp: resetCode });
+    await sendPasswordResetOtp(userDoc);
 
     res
       .status(200)
@@ -122,4 +129,5 @@ module.exports = {
   forgotPassword,
   verifyOtp,
   resetPassword,
+  sendPasswordResetOtp,
 };

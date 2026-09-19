@@ -42,10 +42,17 @@ app.use("/api", require("./routes/rider/riderRoute"));
 app.use("/api", require("./routes/delivery/deliveryRoute"));
 app.use("/api", require("./routes/wallet/walletRoute"));
 app.use("/api", require("./routes/webhook/webhookRoute"));
+app.use("/api", require("./routes/review/reviewRoute"));
+app.use("/api", require("./routes/report/reportRoute"));
 app.use("/api/admin", require("./routes/admin/authRoute"));
 app.use("/api/admin", require("./routes/admin/vendorRoute"));
 app.use("/api/admin", require("./routes/admin/riderRoute"));
 app.use("/api/admin", require("./routes/admin/withdrawalRoute"));
+app.use("/api/admin", require("./routes/admin/reviewRoute"));
+app.use("/api/admin", require("./routes/admin/reportRoute"));
+app.use("/api/admin", require("./routes/admin/dashboardRoute"));
+app.use("/api/admin", require("./routes/admin/userRoute"));
+app.use("/api/admin", require("./routes/admin/productRoute"));
 
 
 // Test route

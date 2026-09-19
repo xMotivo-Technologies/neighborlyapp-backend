@@ -7,8 +7,12 @@ const { applyWalletEntry } = require("../../utils/walletLedger");
 
 const RIDER_SETTABLE_STATUSES = ["picked_up", "in_transit", "delivered"];
 
-// Called from the order controller once payment is verified. Pickup location
-// always comes from the product's own record, never from client input.
+// Called from the order controller once payment is verified. Distance/fee are
+// NOT recomputed here — they're taken from the order's own snapshot, which is
+// the exact figure the buyer was actually charged for delivery. Recomputing
+// independently could drift from that (e.g. if the product's location changed
+// in the gap between order creation and payment) and pay the rider a
+// different amount than what was collected.
 const createDeliveryForOrder = async (order) => {
   const product = await ProductModel.findById(order.product);
 
@@ -22,10 +26,6 @@ const createDeliveryForOrder = async (order) => {
     return null;
   }
 
-  const [pickupLng, pickupLat] = product.locationCoords.coordinates;
-  const [dropoffLng, dropoffLat] = order.deliveryCoords.coordinates;
-  const distanceKm = haversineDistanceKm({ lat: pickupLat, lng: pickupLng }, { lat: dropoffLat, lng: dropoffLng });
-
   return DeliveryModel.create({
     order: order._id,
     vendor: order.vendor,
@@ -34,9 +34,9 @@ const createDeliveryForOrder = async (order) => {
     pickupCoords: product.locationCoords,
     dropoffAddress: order.deliveryAddress,
     dropoffCoords: order.deliveryCoords,
-    distanceKm,
-    fee: estimateDeliveryFee(distanceKm),
-    estimatedDurationMinutes: estimateDurationMinutes(distanceKm),
+    distanceKm: order.deliveryDistanceKm,
+    fee: order.deliveryFee,
+    estimatedDurationMinutes: estimateDurationMinutes(order.deliveryDistanceKm),
   });
 };
 

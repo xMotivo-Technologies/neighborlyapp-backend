@@ -44,6 +44,9 @@ const ProductSchema = new Schema(
     },
     viewCount: { type: Number, default: 0 },
     favoriteCount: { type: Number, default: 0 },
+
+    featured: { type: Boolean, default: false },
+    featuredAt: { type: Date },
   },
   { timestamps: true },
 );

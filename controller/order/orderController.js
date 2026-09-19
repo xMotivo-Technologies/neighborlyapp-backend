@@ -3,6 +3,7 @@ const OrderModel = require("../../models/Order");
 const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { initializeTransaction, verifyTransaction } = require("../../utils/paystack");
+const { haversineDistanceKm, estimateDeliveryFee } = require("../../utils/geo");
 const { createDeliveryForOrder } = require("../delivery/deliveryController");
 
 const VENDOR_SETTABLE_STATUSES = ["processing", "shipped", "completed", "cancelled"];
@@ -12,6 +13,9 @@ const generatePaymentReference = () => `order_${Date.now()}_${crypto.randomBytes
 
 // Buyer starts a purchase. Price, vendor and product details are always
 // re-derived from the DB here — the client only ever supplies productId/quantity.
+// Delivery is mandatory: the buyer's destination is required, the fee is
+// computed from the seller's product location to that destination, and it's
+// charged as part of the same Paystack transaction as the product price.
 const createOrder = async (req, res) => {
   const { productId, quantity, deliveryAddress, lat, lng } = req.body;
 
@@ -19,12 +23,19 @@ const createOrder = async (req, res) => {
     return res.status(400).json({ message: "productId is required" });
   }
 
+  if (!deliveryAddress) {
+    return res.status(400).json({ message: "deliveryAddress is required" });
+  }
+
   const parsedQuantity = Number.isInteger(quantity) ? quantity : parseInt(quantity, 10);
   const finalQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
 
   const parsedLat = parseFloat(lat);
   const parsedLng = parseFloat(lng);
-  const hasDeliveryCoords = !Number.isNaN(parsedLat) && !Number.isNaN(parsedLng);
+
+  if (Number.isNaN(parsedLat) || Number.isNaN(parsedLng)) {
+    return res.status(400).json({ message: "lat and lng (delivery destination) are required" });
+  }
 
   try {
     const product = await ProductModel.findById(productId);
@@ -41,8 +52,19 @@ const createOrder = async (req, res) => {
       return res.status(400).json({ message: "You cannot buy your own product" });
     }
 
+    if (!product.locationCoords?.coordinates || product.locationCoords.coordinates.length !== 2) {
+      return res.status(400).json({ message: "This product has no pickup location set and cannot be delivered" });
+    }
+
+    const [pickupLng, pickupLat] = product.locationCoords.coordinates;
+    const deliveryDistanceKm = haversineDistanceKm(
+      { lat: pickupLat, lng: pickupLng },
+      { lat: parsedLat, lng: parsedLng },
+    );
+    const deliveryFee = estimateDeliveryFee(deliveryDistanceKm);
+
     const unitPrice = product.price;
-    const totalAmount = unitPrice * finalQuantity;
+    const totalAmount = unitPrice * finalQuantity + deliveryFee;
     const paymentReference = generatePaymentReference();
 
     const order = await OrderModel.create({
@@ -54,9 +76,11 @@ const createOrder = async (req, res) => {
       quantity: finalQuantity,
       unitPrice,
       totalAmount,
+      deliveryFee,
+      deliveryDistanceKm,
       paymentReference,
-      deliveryAddress: deliveryAddress || undefined,
-      deliveryCoords: hasDeliveryCoords ? { type: "Point", coordinates: [parsedLng, parsedLat] } : undefined,
+      deliveryAddress,
+      deliveryCoords: { type: "Point", coordinates: [parsedLng, parsedLat] },
     });
 
     let paystackData;
@@ -153,14 +177,13 @@ const verifyPayment = async (req, res) => {
     order.paidAt = new Date();
     await order.save();
 
-    // Delivery is only spun up when the buyer requested one at checkout;
-    // failures here must not undo a payment that already succeeded.
-    if (order.deliveryAddress) {
-      try {
-        await createDeliveryForOrder(order);
-      } catch (deliveryError) {
-        console.error("Auto-create delivery error:", deliveryError);
-      }
+    // Every order includes delivery — spin it up now. A failure here must
+    // not undo a payment that already succeeded; it's logged for manual
+    // follow-up instead.
+    try {
+      await createDeliveryForOrder(order);
+    } catch (deliveryError) {
+      console.error("Auto-create delivery error:", deliveryError);
     }
 
     return res.status(200).json({ message: "Payment verified successfully", order });

@@ -48,8 +48,12 @@ const userSchema = new Schema(
     status: {
       type: String,
       default: "active",
-      enum: ["active", "suspended"],
+      enum: ["active", "suspended", "banned"],
     },
+    suspendedAt: { type: Date },
+    suspendReason: { type: String },
+    bannedAt: { type: Date },
+    banReason: { type: String },
     otp: {
       type: String,
       select: false,
@@ -87,6 +91,11 @@ const userSchema = new Schema(
       enum: ["none", "pending", "approved", "rejected"],
       default: "none",
     },
+
+    // Denormalized from visible Reviews where this user is the vendor —
+    // recomputed on review create/hide, never written to directly elsewhere.
+    ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
+    ratingCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );
