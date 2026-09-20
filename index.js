@@ -44,6 +44,7 @@ app.use("/api", require("./routes/wallet/walletRoute"));
 app.use("/api", require("./routes/webhook/webhookRoute"));
 app.use("/api", require("./routes/review/reviewRoute"));
 app.use("/api", require("./routes/report/reportRoute"));
+app.use("/api", require("./routes/user/profile/profileRoute"));
 app.use("/api/admin", require("./routes/admin/authRoute"));
 app.use("/api/admin", require("./routes/admin/vendorRoute"));
 app.use("/api/admin", require("./routes/admin/riderRoute"));
