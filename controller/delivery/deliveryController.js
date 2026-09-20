@@ -4,6 +4,8 @@ const ProductModel = require("../../models/Products");
 const RiderModel = require("../../models/Rider");
 const { haversineDistanceKm, estimateDeliveryFee, estimateDurationMinutes } = require("../../utils/geo");
 const { applyWalletEntry } = require("../../utils/walletLedger");
+const { applyVendorWalletEntry } = require("../../utils/vendorWalletLedger");
+const { getPlatformSettings } = require("../../utils/platformSettings");
 
 const RIDER_SETTABLE_STATUSES = ["picked_up", "in_transit", "delivered"];
 
@@ -28,6 +30,10 @@ const createDeliveryForOrder = async (order) => {
     return null;
   }
 
+  const { deliveryCommissionPercent } = await getPlatformSettings();
+  const platformDeliveryCommission = Math.round(order.deliveryFee * (deliveryCommissionPercent / 100) * 100) / 100;
+  const riderEarning = order.deliveryFee - platformDeliveryCommission;
+
   return DeliveryModel.create({
     order: order._id,
     vendor: order.vendor,
@@ -39,6 +45,9 @@ const createDeliveryForOrder = async (order) => {
     distanceKm: order.deliveryDistanceKm,
     fee: order.deliveryFee,
     estimatedDurationMinutes: estimateDurationMinutes(order.deliveryDistanceKm),
+    platformCommissionPercent: deliveryCommissionPercent,
+    platformDeliveryCommission,
+    riderEarning,
   });
 };
 
@@ -215,22 +224,25 @@ const confirmDelivery = async (req, res) => {
     delivery.confirmedAt = new Date();
     await delivery.save();
 
-    try {
-      await OrderModel.findByIdAndUpdate(delivery.order, { status: "completed" });
-    } catch (syncError) {
-      console.error("Order status sync error (confirm):", syncError);
-    }
+    const order = await OrderModel.findByIdAndUpdate(delivery.order, { status: "completed" }, { new: true }).catch(
+      (syncError) => {
+        console.error("Order status sync error (confirm):", syncError);
+        return null;
+      },
+    );
 
-    // Rider is only paid once the buyer confirms receipt, not merely when
-    // marked "delivered" — protects against a rider falsely claiming delivery.
-    if (delivery.rider && delivery.fee > 0) {
+    // Rider and vendor are only paid once the buyer confirms receipt, not
+    // merely when marked "delivered" — protects against a false claim of
+    // delivery and against paying out on an order that turns out disputed.
+    const riderEarning = delivery.riderEarning ?? delivery.fee;
+    if (delivery.rider && riderEarning > 0) {
       try {
         const rider = await RiderModel.findOne({ user: delivery.rider });
         if (rider) {
           await applyWalletEntry({
             riderId: rider._id,
             type: "credit",
-            amount: delivery.fee,
+            amount: riderEarning,
             reason: "delivery_earning",
             idempotencyKey: `earning_${delivery._id}`,
             delivery: delivery._id,
@@ -238,6 +250,21 @@ const confirmDelivery = async (req, res) => {
         }
       } catch (walletError) {
         console.error("Credit rider wallet error:", walletError);
+      }
+    }
+
+    if (order?.vendorEarning > 0) {
+      try {
+        await applyVendorWalletEntry({
+          vendorId: order.vendor,
+          type: "credit",
+          amount: order.vendorEarning,
+          reason: "order_earning",
+          idempotencyKey: `vendor_earning_${order._id}`,
+          order: order._id,
+        });
+      } catch (walletError) {
+        console.error("Credit vendor wallet error:", walletError);
       }
     }
 

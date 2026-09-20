@@ -7,6 +7,7 @@ const {
   updateAvailability,
   updateLocation,
   getAvailableDeliveries,
+  getDeliveryHistory,
   getBankOptions,
 } = require("../../controller/rider/riderController");
 
@@ -18,6 +19,7 @@ router.put("/riders/profile", authToken, updateRiderProfile);
 router.put("/riders/availability", authToken, isRider, updateAvailability);
 router.put("/riders/location", authToken, isRider, updateLocation);
 router.get("/riders/available-deliveries", authToken, isRider, getAvailableDeliveries);
+router.get("/riders/delivery-history", authToken, isRider, getDeliveryHistory);
 router.get("/riders/banks", authToken, getBankOptions);
 
 module.exports = router;

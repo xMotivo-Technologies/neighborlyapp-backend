@@ -1,5 +1,6 @@
 const RiderModel = require("../../models/Rider");
 const DeliveryModel = require("../../models/Delivery");
+const { DELIVERY_STATUSES } = DeliveryModel;
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { listBanks, resolveAccountNumber } = require("../../utils/paystack");
 
@@ -202,7 +203,7 @@ const getAvailableDeliveries = async (req, res) => {
 
     const [deliveries, total] = await Promise.all([
       DeliveryModel.find(findFilter)
-        .populate("order", "productName quantity totalAmount")
+        .populate("order", "items totalAmount")
         .skip(skip)
         .limit(limit),
       DeliveryModel.countDocuments(countFilter),
@@ -218,6 +219,40 @@ const getAvailableDeliveries = async (req, res) => {
   }
 };
 
+// A rider's own past deliveries, most recent first. Optional ?status= filters
+// to a single delivery status (e.g. "confirmed" for completed-only history).
+const getDeliveryHistory = async (req, res) => {
+  try {
+    const { page, limit, skip } = getPagination(req.query);
+    const { status } = req.query;
+
+    if (status !== undefined && !DELIVERY_STATUSES.includes(status)) {
+      return res.status(400).json({ message: `status must be one of: ${DELIVERY_STATUSES.join(", ")}` });
+    }
+
+    const filter = { rider: req.user._id, ...(status !== undefined ? { status } : {}) };
+
+    const [deliveries, total] = await Promise.all([
+      DeliveryModel.find(filter)
+        .populate("order", "items totalAmount")
+        .populate("buyer", "firstName lastName")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      DeliveryModel.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      data: deliveries,
+      pagination: buildPaginationMeta({ page, limit, total }),
+    });
+  } catch (error) {
+    console.error("Get delivery history error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 module.exports = {
   applyAsRider,
   getRiderProfile,
@@ -225,5 +260,6 @@ module.exports = {
   updateAvailability,
   updateLocation,
   getAvailableDeliveries,
+  getDeliveryHistory,
   getBankOptions,
 };

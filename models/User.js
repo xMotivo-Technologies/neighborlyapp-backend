@@ -92,6 +92,20 @@ const userSchema = new Schema(
       default: "none",
     },
 
+    // Vendor earnings wallet. Credited with an order's vendorEarning once the
+    // buyer confirms delivery (see confirmDelivery in deliveryController.js).
+    walletBalance: { type: Number, default: 0, min: 0 },
+    // Bank details are only ever written after being resolved against
+    // Paystack (see updateVendorBankDetails) — bankAccountName is never
+    // trusted from the client.
+    bankAccountNumber: { type: String },
+    bankCode: { type: String },
+    bankName: { type: String },
+    bankAccountName: { type: String },
+    // Cached Paystack transfer recipient for this bank account; cleared
+    // whenever bank details change so it gets recreated on next withdrawal.
+    paystackRecipientCode: { type: String },
+
     // Denormalized from visible Reviews where this user is the vendor —
     // recomputed on review create/hide, never written to directly elsewhere.
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },

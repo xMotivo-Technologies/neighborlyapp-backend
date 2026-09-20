@@ -5,6 +5,7 @@ const { getPagination, buildPaginationMeta } = require("../../utils/pagination")
 const { initializeTransaction, verifyTransaction } = require("../../utils/paystack");
 const { haversineDistanceKm, estimateDeliveryFee } = require("../../utils/geo");
 const { createDeliveryForOrder } = require("../delivery/deliveryController");
+const { getPlatformSettings } = require("../../utils/platformSettings");
 
 const VENDOR_SETTABLE_STATUSES = ["processing", "shipped", "completed", "cancelled"];
 const CANCELLABLE_STATUSES = ["pending_payment", "paid", "processing"];
@@ -74,7 +75,8 @@ const createOrder = async (req, res) => {
   }
 
   try {
-    const groupsByVendor = await groupItemsByVendor(items);
+    const [groupsByVendor, platformSettings] = await Promise.all([groupItemsByVendor(items), getPlatformSettings()]);
+    const productCommissionPercent = platformSettings.productCommissionPercent;
 
     // Validate every vendor group up front, before creating anything, so a
     // problem with one vendor's items doesn't leave earlier orders orphaned.
@@ -120,6 +122,8 @@ const createOrder = async (req, res) => {
       }));
       const itemsTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
       const totalAmount = itemsTotal + deliveryFee;
+      const platformCommissionAmount = Math.round(itemsTotal * (productCommissionPercent / 100) * 100) / 100;
+      const vendorEarning = itemsTotal - platformCommissionAmount;
 
       const order = await OrderModel.create({
         orderGroup,
@@ -129,6 +133,9 @@ const createOrder = async (req, res) => {
         totalAmount,
         deliveryFee,
         deliveryDistanceKm,
+        platformCommissionPercent: productCommissionPercent,
+        platformCommissionAmount,
+        vendorEarning,
         paymentReference,
         deliveryAddress,
         deliveryCoords: { type: "Point", coordinates: [parsedLng, parsedLat] },

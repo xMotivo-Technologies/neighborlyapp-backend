@@ -1,14 +1,29 @@
 const crypto = require("crypto");
 const WithdrawalModel = require("../../models/Withdrawal");
+const VendorWithdrawalModel = require("../../models/VendorWithdrawal");
 const { applyWalletEntry } = require("../../utils/walletLedger");
+const { applyVendorWalletEntry } = require("../../utils/vendorWalletLedger");
 
 const TERMINAL_STATUSES = ["approved", "rejected", "failed"];
 
 const finalizeWithdrawalTransfer = async (reference, outcome, paystackData) => {
   if (!reference) return;
 
+  // A transfer reference belongs to either a rider withdrawal or a vendor
+  // withdrawal — check both since Paystack's webhook doesn't say which.
   const withdrawal = await WithdrawalModel.findOne({ transferReference: reference });
-  if (!withdrawal || TERMINAL_STATUSES.includes(withdrawal.status)) return; // already finalized
+  if (withdrawal) {
+    return finalizeRiderWithdrawal(withdrawal, outcome, paystackData);
+  }
+
+  const vendorWithdrawal = await VendorWithdrawalModel.findOne({ transferReference: reference });
+  if (vendorWithdrawal) {
+    return finalizeVendorWithdrawal(vendorWithdrawal, outcome, paystackData);
+  }
+};
+
+const finalizeRiderWithdrawal = async (withdrawal, outcome, paystackData) => {
+  if (TERMINAL_STATUSES.includes(withdrawal.status)) return; // already finalized
 
   withdrawal.paystackStatus = paystackData.status;
   withdrawal.transferCode = paystackData.transfer_code || withdrawal.transferCode;
@@ -25,6 +40,32 @@ const finalizeWithdrawalTransfer = async (reference, outcome, paystackData) => {
     amount: withdrawal.amount,
     reason: "withdrawal_reversal",
     idempotencyKey: `withdrawal_reversal_${withdrawal._id}`,
+    withdrawal: withdrawal._id,
+  });
+
+  withdrawal.status = "failed";
+  withdrawal.failureReason = paystackData.message || "Transfer failed";
+  await withdrawal.save();
+};
+
+const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
+  if (TERMINAL_STATUSES.includes(withdrawal.status)) return; // already finalized
+
+  withdrawal.paystackStatus = paystackData.status;
+  withdrawal.transferCode = paystackData.transfer_code || withdrawal.transferCode;
+
+  if (outcome === "success") {
+    withdrawal.status = "approved";
+    await withdrawal.save();
+    return;
+  }
+
+  await applyVendorWalletEntry({
+    vendorId: withdrawal.vendor,
+    type: "credit",
+    amount: withdrawal.amount,
+    reason: "withdrawal_reversal",
+    idempotencyKey: `vendor_withdrawal_reversal_${withdrawal._id}`,
     withdrawal: withdrawal._id,
   });
 

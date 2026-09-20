@@ -56,6 +56,15 @@ const OrderSchema = new Schema(
     deliveryDistanceKm: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "NGN" },
 
+    // Neighborly's cut of the item subtotal (not the delivery fee), snapshotted
+    // from PlatformSettings at order creation so a later rate change never
+    // rewrites what this order actually owed.
+    platformCommissionPercent: { type: Number, required: true, min: 0, max: 100 },
+    platformCommissionAmount: { type: Number, required: true, min: 0 },
+    // vendorEarning = (sum of item lineTotals) - platformCommissionAmount.
+    // Paid into the vendor's wallet once the buyer confirms delivery.
+    vendorEarning: { type: Number, required: true, min: 0 },
+
     status: {
       type: String,
       enum: ORDER_STATUSES,

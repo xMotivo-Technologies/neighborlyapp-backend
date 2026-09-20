@@ -52,6 +52,15 @@ const DeliverySchema = new Schema(
     fee: { type: Number },
     estimatedDurationMinutes: { type: Number },
 
+    // Neighborly's cut of the delivery fee, snapshotted from PlatformSettings
+    // when the delivery is created so a later rate change never rewrites what
+    // this delivery actually owed.
+    platformCommissionPercent: { type: Number, min: 0, max: 100 },
+    platformDeliveryCommission: { type: Number, min: 0 },
+    // riderEarning = fee - platformDeliveryCommission. Paid into the rider's
+    // wallet once the buyer confirms delivery.
+    riderEarning: { type: Number, min: 0 },
+
     status: {
       type: String,
       enum: DELIVERY_STATUSES,
@@ -71,3 +80,4 @@ DeliverySchema.index({ status: 1, rider: 1 });
 const DeliveryModel = mongoose.models.Delivery || mongoose.model("Delivery", DeliverySchema);
 
 module.exports = DeliveryModel;
+module.exports.DELIVERY_STATUSES = DELIVERY_STATUSES;
