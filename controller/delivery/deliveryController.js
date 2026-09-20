@@ -14,7 +14,9 @@ const RIDER_SETTABLE_STATUSES = ["picked_up", "in_transit", "delivered"];
 // in the gap between order creation and payment) and pay the rider a
 // different amount than what was collected.
 const createDeliveryForOrder = async (order) => {
-  const product = await ProductModel.findById(order.product);
+  // All items on an order share one vendor/pickup point, so the first item's
+  // product location is the pickup point for the whole order.
+  const product = await ProductModel.findById(order.items[0].product);
 
   if (!product?.locationCoords?.coordinates || product.locationCoords.coordinates.length !== 2) {
     console.error(`Skipping delivery creation for order ${order._id}: product has no pickup location`);

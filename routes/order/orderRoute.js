@@ -3,6 +3,7 @@ const { authToken, isVendor } = require("../../middleware/auth");
 const {
   createOrder,
   verifyPayment,
+  getOrderGroup,
   getMyOrders,
   getVendorOrders,
   getOrderById,
@@ -15,6 +16,7 @@ const router = express.Router();
 router.post("/orders", authToken, createOrder);
 router.get("/orders", authToken, getMyOrders);
 router.get("/vendor/orders", authToken, isVendor, getVendorOrders);
+router.get("/orders/group/:orderGroup", authToken, getOrderGroup);
 router.get("/orders/:id", authToken, getOrderById);
 router.put("/orders/:id/status", authToken, isVendor, updateOrderStatus);
 router.put("/orders/:id/cancel", authToken, cancelOrder);

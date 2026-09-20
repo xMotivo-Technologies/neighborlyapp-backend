@@ -10,25 +10,61 @@ const VENDOR_SETTABLE_STATUSES = ["processing", "shipped", "completed", "cancell
 const CANCELLABLE_STATUSES = ["pending_payment", "paid", "processing"];
 
 const generatePaymentReference = () => `order_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
+const generateOrderGroup = () => `grp_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
 
-// Buyer starts a purchase. Price, vendor and product details are always
-// re-derived from the DB here — the client only ever supplies productId/quantity.
-// Delivery is mandatory: the buyer's destination is required, the fee is
-// computed from the seller's product location to that destination, and it's
-// charged as part of the same Paystack transaction as the product price.
+// A cart can hold products from several vendors. Each vendor gets its own
+// pickup point, so it also gets its own delivery distance/fee and its own
+// Order document — this groups the raw cart items by vendor so the rest of
+// createOrder can build one Order per vendor.
+const groupItemsByVendor = async (items) => {
+  const productIds = items.map((item) => item.productId);
+  const products = await ProductModel.find({ _id: { $in: productIds } });
+  const productById = new Map(products.map((product) => [product._id.toString(), product]));
+
+  const groupsByVendor = new Map();
+
+  for (const item of items) {
+    const product = productById.get(item.productId);
+    if (!product) {
+      throw new OrderValidationError(404, `Product ${item.productId} not found`);
+    }
+
+    const parsedQuantity = Number.isInteger(item.quantity) ? item.quantity : parseInt(item.quantity, 10);
+    const quantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+
+    const vendorId = product.vendor.toString();
+    if (!groupsByVendor.has(vendorId)) {
+      groupsByVendor.set(vendorId, []);
+    }
+    groupsByVendor.get(vendorId).push({ product, quantity });
+  }
+
+  return groupsByVendor;
+};
+
+// Thrown for any per-item validation failure so createOrder can map it
+// straight to the right HTTP status instead of always falling back to 500.
+class OrderValidationError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 const createOrder = async (req, res) => {
-  const { productId, quantity, deliveryAddress, lat, lng } = req.body;
+  const { items, deliveryAddress, lat, lng } = req.body;
 
-  if (!productId) {
-    return res.status(400).json({ message: "productId is required" });
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "items is required and must be a non-empty array" });
+  }
+
+  if (items.some((item) => !item?.productId)) {
+    return res.status(400).json({ message: "Every item must include a productId" });
   }
 
   if (!deliveryAddress) {
     return res.status(400).json({ message: "deliveryAddress is required" });
   }
-
-  const parsedQuantity = Number.isInteger(quantity) ? quantity : parseInt(quantity, 10);
-  const finalQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
 
   const parsedLat = parseFloat(lat);
   const parsedLng = parseFloat(lng);
@@ -38,74 +74,94 @@ const createOrder = async (req, res) => {
   }
 
   try {
-    const product = await ProductModel.findById(productId);
+    const groupsByVendor = await groupItemsByVendor(items);
 
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+    // Validate every vendor group up front, before creating anything, so a
+    // problem with one vendor's items doesn't leave earlier orders orphaned.
+    for (const vendorItems of groupsByVendor.values()) {
+      for (const { product } of vendorItems) {
+        if (product.status !== "active") {
+          throw new OrderValidationError(400, `"${product.name}" is not available for purchase`);
+        }
+        if (product.vendor.toString() === req.user._id.toString()) {
+          throw new OrderValidationError(400, `You cannot buy your own product: "${product.name}"`);
+        }
+        if (!product.locationCoords?.coordinates || product.locationCoords.coordinates.length !== 2) {
+          throw new OrderValidationError(
+            400,
+            `"${product.name}" has no pickup location set and cannot be delivered`,
+          );
+        }
+      }
     }
 
-    if (product.status !== "active") {
-      return res.status(400).json({ message: "Product is not available for purchase" });
-    }
-
-    if (product.vendor.toString() === req.user._id.toString()) {
-      return res.status(400).json({ message: "You cannot buy your own product" });
-    }
-
-    if (!product.locationCoords?.coordinates || product.locationCoords.coordinates.length !== 2) {
-      return res.status(400).json({ message: "This product has no pickup location set and cannot be delivered" });
-    }
-
-    const [pickupLng, pickupLat] = product.locationCoords.coordinates;
-    const deliveryDistanceKm = haversineDistanceKm(
-      { lat: pickupLat, lng: pickupLng },
-      { lat: parsedLat, lng: parsedLng },
-    );
-    const deliveryFee = estimateDeliveryFee(deliveryDistanceKm);
-
-    const unitPrice = product.price;
-    const totalAmount = unitPrice * finalQuantity + deliveryFee;
+    const orderGroup = generateOrderGroup();
     const paymentReference = generatePaymentReference();
+    const orders = [];
 
-    const order = await OrderModel.create({
-      buyer: req.user._id,
-      vendor: product.vendor,
-      product: product._id,
-      productName: product.name,
-      productImage: product.imgUrl?.[0],
-      quantity: finalQuantity,
-      unitPrice,
-      totalAmount,
-      deliveryFee,
-      deliveryDistanceKm,
-      paymentReference,
-      deliveryAddress,
-      deliveryCoords: { type: "Point", coordinates: [parsedLng, parsedLat] },
-    });
+    for (const vendorItems of groupsByVendor.values()) {
+      // All of a vendor's products share one pickup point in practice, so the
+      // first item's location is used for the whole vendor group's delivery
+      // distance/fee.
+      const [pickupLng, pickupLat] = vendorItems[0].product.locationCoords.coordinates;
+      const deliveryDistanceKm = haversineDistanceKm(
+        { lat: pickupLat, lng: pickupLng },
+        { lat: parsedLat, lng: parsedLng },
+      );
+      const deliveryFee = estimateDeliveryFee(deliveryDistanceKm);
+
+      const orderItems = vendorItems.map(({ product, quantity }) => ({
+        product: product._id,
+        productName: product.name,
+        productImage: product.imgUrl?.[0],
+        quantity,
+        unitPrice: product.price,
+        lineTotal: product.price * quantity,
+      }));
+      const itemsTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
+      const totalAmount = itemsTotal + deliveryFee;
+
+      const order = await OrderModel.create({
+        orderGroup,
+        buyer: req.user._id,
+        vendor: vendorItems[0].product.vendor,
+        items: orderItems,
+        totalAmount,
+        deliveryFee,
+        deliveryDistanceKm,
+        paymentReference,
+        deliveryAddress,
+        deliveryCoords: { type: "Point", coordinates: [parsedLng, parsedLat] },
+      });
+
+      orders.push(order);
+    }
+
+    const grandTotal = orders.reduce((sum, order) => sum + order.totalAmount, 0);
 
     let paystackData;
     try {
       const paystackResponse = await initializeTransaction({
         email: req.user.email,
-        amount: Math.round(totalAmount * 100),
+        amount: Math.round(grandTotal * 100),
         reference: paymentReference,
         metadata: {
-          orderId: order._id.toString(),
-          productId: product._id.toString(),
+          orderGroup,
+          orderIds: orders.map((order) => order._id.toString()),
           buyerId: req.user._id.toString(),
         },
       });
       paystackData = paystackResponse.data;
     } catch (paystackError) {
       console.error("Paystack initialize error:", paystackError);
-      order.paymentStatus = "failed";
-      await order.save();
+      await OrderModel.updateMany({ orderGroup }, { paymentStatus: "failed" });
       return res.status(502).json({ message: "Unable to initialize payment" });
     }
 
     return res.status(201).json({
       message: "Order created, proceed to payment",
-      order,
+      orderGroup,
+      orders,
       payment: {
         authorizationUrl: paystackData.authorization_url,
         accessCode: paystackData.access_code,
@@ -113,82 +169,99 @@ const createOrder = async (req, res) => {
       },
     });
   } catch (error) {
+    if (error instanceof OrderValidationError) {
+      return res.status(error.status).json({ message: error.message });
+    }
     console.error("Create order error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
-// Confirms payment with Paystack and marks the order paid. The client only
-// ever supplies productId/reference/quantity — the amount is verified
-// against what this order was actually initialized for, never client input.
+// Confirms payment with Paystack and marks every order in the checkout's
+// group paid. One checkout produces one Paystack transaction (and reference)
+// covering N orders (one per vendor), so verification and the amount check
+// happen once, against the sum of all those orders — never against a single
+// order's total.
 const verifyPayment = async (req, res) => {
-  const { productId, reference, quantity } = req.body;
+  const { reference } = req.body;
 
-  if (!productId || !reference) {
-    return res.status(400).json({ message: "productId and reference are required" });
+  if (!reference) {
+    return res.status(400).json({ message: "reference is required" });
   }
 
-  const parsedQuantity = Number.isInteger(quantity) ? quantity : parseInt(quantity, 10);
-  const finalQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
-
   try {
-    const order = await OrderModel.findOne({ paymentReference: reference });
+    const orders = await OrderModel.find({ paymentReference: reference });
 
-    if (!order) {
+    if (orders.length === 0) {
       return res.status(404).json({ message: "Order not found for this reference" });
     }
 
-    if (order.buyer.toString() !== req.user._id.toString()) {
+    if (orders.some((order) => order.buyer.toString() !== req.user._id.toString())) {
       return res.status(403).json({ message: "This order does not belong to you" });
     }
 
-    if (order.product.toString() !== productId) {
-      return res.status(400).json({ message: "productId does not match this payment reference" });
-    }
-
-    if (order.quantity !== finalQuantity) {
-      return res.status(400).json({ message: "quantity does not match this payment reference" });
-    }
-
-    if (order.paymentStatus === "success") {
-      return res.status(200).json({ message: "Payment already verified", order });
+    if (orders.every((order) => order.paymentStatus === "success")) {
+      return res.status(200).json({ message: "Payment already verified", orders });
     }
 
     const { data: transaction } = await verifyTransaction(reference);
 
     if (transaction.status !== "success") {
-      order.paymentStatus = "failed";
-      await order.save();
+      await OrderModel.updateMany({ paymentReference: reference }, { paymentStatus: "failed" });
       return res.status(400).json({ message: "Payment was not successful" });
     }
 
-    const expectedAmountKobo = Math.round(order.totalAmount * 100);
+    const expectedAmountKobo = Math.round(orders.reduce((sum, order) => sum + order.totalAmount, 0) * 100);
     if (transaction.amount !== expectedAmountKobo) {
-      order.paymentStatus = "failed";
-      await order.save();
+      await OrderModel.updateMany({ paymentReference: reference }, { paymentStatus: "failed" });
       console.error(
-        `Payment amount mismatch for order ${order._id}: expected ${expectedAmountKobo}, got ${transaction.amount}`,
+        `Payment amount mismatch for reference ${reference}: expected ${expectedAmountKobo}, got ${transaction.amount}`,
       );
       return res.status(400).json({ message: "Payment amount mismatch" });
     }
 
-    order.paymentStatus = "success";
-    order.status = "paid";
-    order.paidAt = new Date();
-    await order.save();
+    for (const order of orders) {
+      order.paymentStatus = "success";
+      order.status = "paid";
+      order.paidAt = new Date();
+      await order.save();
 
-    // Every order includes delivery — spin it up now. A failure here must
-    // not undo a payment that already succeeded; it's logged for manual
-    // follow-up instead.
-    try {
-      await createDeliveryForOrder(order);
-    } catch (deliveryError) {
-      console.error("Auto-create delivery error:", deliveryError);
+      // Every order includes delivery — spin it up now, per vendor. A
+      // failure here must not undo a payment that already succeeded; it's
+      // logged for manual follow-up instead.
+      try {
+        await createDeliveryForOrder(order);
+      } catch (deliveryError) {
+        console.error("Auto-create delivery error:", deliveryError);
+      }
     }
 
-    return res.status(200).json({ message: "Payment verified successfully", order });
+    return res.status(200).json({ message: "Payment verified successfully", orders });
   } catch (error) {
     console.error("Verify payment error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Fetches every sibling order from one checkout (buyer-owned only) — used to
+// render an order-confirmation screen right after payment, since one
+// checkout now yields one order per vendor instead of a single order.
+const getOrderGroup = async (req, res) => {
+  const { orderGroup } = req.params;
+
+  try {
+    const orders = await OrderModel.find({ orderGroup, buyer: req.user._id })
+      .populate("items.product", "name price imgUrl")
+      .populate("vendor", "businessName businessAddress")
+      .sort({ createdAt: 1 });
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: "Order group not found" });
+    }
+
+    return res.status(200).json({ orderGroup, orders });
+  } catch (error) {
+    console.error("Get order group error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -201,7 +274,7 @@ const getMyOrders = async (req, res) => {
 
     const [orders, total] = await Promise.all([
       OrderModel.find(filter)
-        .populate("product", "name price imgUrl")
+        .populate("items.product", "name price imgUrl")
         .populate("vendor", "businessName businessAddress")
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -227,7 +300,7 @@ const getVendorOrders = async (req, res) => {
 
     const [orders, total] = await Promise.all([
       OrderModel.find(filter)
-        .populate("product", "name price imgUrl")
+        .populate("items.product", "name price imgUrl")
         .populate("buyer", "firstName lastName email")
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -250,7 +323,7 @@ const getOrderById = async (req, res) => {
 
   try {
     const order = await OrderModel.findById(id)
-      .populate("product", "name price imgUrl")
+      .populate("items.product", "name price imgUrl")
       .populate("buyer", "firstName lastName email")
       .populate("vendor", "businessName businessAddress");
 
@@ -348,6 +421,7 @@ const cancelOrder = async (req, res) => {
 module.exports = {
   createOrder,
   verifyPayment,
+  getOrderGroup,
   getMyOrders,
   getVendorOrders,
   getOrderById,

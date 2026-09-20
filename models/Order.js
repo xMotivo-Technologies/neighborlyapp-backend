@@ -3,8 +3,33 @@ const { Schema } = mongoose;
 
 const ORDER_STATUSES = ["pending_payment", "paid", "processing", "shipped", "completed", "cancelled"];
 
+// One Order = one vendor. A buyer's cart can span several vendors, but since
+// each vendor has its own pickup point (and therefore its own delivery
+// distance/fee), a single checkout is split into one Order per vendor. All
+// Orders born from the same checkout share `orderGroup` and `paymentReference`
+// so a single Paystack transaction can pay for all of them at once.
+const OrderItemSchema = new Schema(
+  {
+    product: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+    },
+    productName: { type: String, required: true },
+    productImage: { type: String },
+    quantity: { type: Number, required: true, min: 1, default: 1 },
+    unitPrice: { type: Number, required: true, min: 0 },
+    // lineTotal = unitPrice * quantity, snapshotted at purchase time.
+    lineTotal: { type: Number, required: true, min: 0 },
+  },
+  { _id: false },
+);
+
 const OrderSchema = new Schema(
   {
+    // Shared by every sibling Order created from the same checkout.
+    orderGroup: { type: String, required: true, index: true },
+
     buyer: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -15,17 +40,17 @@ const OrderSchema = new Schema(
       ref: "User",
       required: true,
     },
-    product: {
-      type: Schema.Types.ObjectId,
-      ref: "Product",
+    items: {
+      type: [OrderItemSchema],
       required: true,
+      validate: {
+        validator: (items) => Array.isArray(items) && items.length > 0,
+        message: "An order must have at least one item",
+      },
     },
-    productName: { type: String, required: true },
-    productImage: { type: String },
 
-    quantity: { type: Number, required: true, min: 1, default: 1 },
-    unitPrice: { type: Number, required: true, min: 0 },
-    // totalAmount = (unitPrice * quantity) + deliveryFee — the exact figure charged via Paystack.
+    // totalAmount = sum of item lineTotals + deliveryFee — the exact figure
+    // this vendor's share of the checkout was charged for.
     totalAmount: { type: Number, required: true, min: 0 },
     deliveryFee: { type: Number, required: true, min: 0 },
     deliveryDistanceKm: { type: Number, required: true, min: 0 },
@@ -37,7 +62,9 @@ const OrderSchema = new Schema(
       default: "pending_payment",
     },
 
-    paymentReference: { type: String, required: true, unique: true },
+    // Shared across every Order in the same orderGroup (one Paystack charge
+    // pays for all of them), so it's unique per-vendor rather than globally.
+    paymentReference: { type: String, required: true },
     paymentStatus: {
       type: String,
       enum: ["pending", "success", "failed"],
@@ -46,10 +73,6 @@ const OrderSchema = new Schema(
     paidAt: { type: Date },
     cancelledAt: { type: Date },
     cancelReason: { type: String },
-
-    // Delivery is mandatory on every order — the buyer's supplied destination,
-    // used both to charge the delivery fee up front and, once payment is
-    // verified, to create the Delivery a rider will pick up.
     deliveryAddress: { type: String, required: true },
     deliveryCoords: {
       type: {
@@ -66,6 +89,8 @@ const OrderSchema = new Schema(
 
 OrderSchema.index({ buyer: 1, createdAt: -1 });
 OrderSchema.index({ vendor: 1, createdAt: -1 });
+OrderSchema.index({ orderGroup: 1 });
+OrderSchema.index({ paymentReference: 1, vendor: 1 }, { unique: true });
 
 const OrderModel = mongoose.models.Order || mongoose.model("Order", OrderSchema);
 

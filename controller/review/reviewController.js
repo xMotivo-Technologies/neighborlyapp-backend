@@ -20,9 +20,12 @@ const recomputeVendorRating = async (vendorId) => {
 };
 
 // Only the buyer on a completed order can review it, once, 1-5 stars.
-// Vendor and product are always taken from the order, never from the client.
+// Vendor is always taken from the order, never from the client. An order can
+// now hold several items (from one vendor) — the review targets a specific
+// product from that order, defaulting to the first item when the client
+// doesn't pick one (matches the old single-item behavior).
 const createReview = async (req, res) => {
-  const { orderId, rating, comment } = req.body;
+  const { orderId, productId, rating, comment } = req.body;
 
   if (!orderId) {
     return res.status(400).json({ message: "orderId is required" });
@@ -48,6 +51,14 @@ const createReview = async (req, res) => {
       return res.status(400).json({ message: "Order must be delivered before it can be reviewed" });
     }
 
+    const orderItem = productId
+      ? order.items.find((item) => item.product.toString() === productId)
+      : order.items[0];
+
+    if (!orderItem) {
+      return res.status(400).json({ message: "productId does not match any item on this order" });
+    }
+
     const existing = await ReviewModel.findOne({ order: order._id });
     if (existing) {
       return res.status(400).json({ message: "This order has already been reviewed" });
@@ -55,7 +66,7 @@ const createReview = async (req, res) => {
 
     const review = await ReviewModel.create({
       order: order._id,
-      product: order.product,
+      product: orderItem.product,
       buyer: order.buyer,
       vendor: order.vendor,
       rating: parsedRating,
