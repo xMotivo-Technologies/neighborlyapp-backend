@@ -3,6 +3,7 @@ const UserModel = require("../../models/User");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { applyVendorWalletEntry } = require("../../utils/vendorWalletLedger");
 const { createTransferRecipient, initiateTransfer, verifyTransferByReference } = require("../../utils/paystack");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 // Mirrors controller/admin/withdrawalApplications.js (the rider withdrawal
 // admin flow) but for vendors.
@@ -142,6 +143,13 @@ const approveWithdrawal = async (req, res) => {
     if (data.status === "success") {
       withdrawal.status = "approved";
       await withdrawal.save();
+
+      notify({
+        recipientId: withdrawal.vendor,
+        template: TEMPLATES.VENDOR_WITHDRAWAL_APPROVED(),
+        data: { withdrawalId: withdrawal._id.toString() },
+      });
+
       return res.status(200).json({ message: "Withdrawal approved and transfer completed", withdrawal });
     }
 
@@ -192,6 +200,12 @@ const rejectWithdrawal = async (req, res) => {
     withdrawal.reviewedBy = req.admin._id;
     withdrawal.reviewedAt = new Date();
     await withdrawal.save();
+
+    notify({
+      recipientId: withdrawal.vendor,
+      template: TEMPLATES.VENDOR_WITHDRAWAL_REJECTED(reason),
+      data: { withdrawalId: withdrawal._id.toString(), reason },
+    });
 
     return res.status(200).json({ message: "Withdrawal rejected and funds returned to wallet", withdrawal });
   } catch (error) {

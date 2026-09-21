@@ -4,8 +4,11 @@ const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { initializeTransaction, verifyTransaction } = require("../../utils/paystack");
 const { haversineDistanceKm, estimateDeliveryFee } = require("../../utils/geo");
+const DeliveryModel = require("../../models/Delivery");
 const { createDeliveryForOrder } = require("../delivery/deliveryController");
 const { getPlatformSettings } = require("../../utils/platformSettings");
+const { finalizeOrderPayment } = require("../../utils/orderPayment");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const VENDOR_SETTABLE_STATUSES = ["processing", "shipped", "completed", "cancelled"];
 const CANCELLABLE_STATUSES = ["pending_payment", "paid", "processing"];
@@ -211,39 +214,20 @@ const verifyPayment = async (req, res) => {
       return res.status(200).json({ message: "Payment already verified", orders });
     }
 
-    const { data: transaction } = await verifyTransaction(reference);
+    const result = await finalizeOrderPayment({ paymentReference: reference });
 
-    if (transaction.status !== "success") {
-      await OrderModel.updateMany({ paymentReference: reference }, { paymentStatus: "failed" });
+    if (!result.success) {
+      if (result.reason === "AMOUNT_MISMATCH") {
+        return res.status(400).json({ message: "Payment amount mismatch" });
+      }
       return res.status(400).json({ message: "Payment was not successful" });
     }
 
-    const expectedAmountKobo = Math.round(orders.reduce((sum, order) => sum + order.totalAmount, 0) * 100);
-    if (transaction.amount !== expectedAmountKobo) {
-      await OrderModel.updateMany({ paymentReference: reference }, { paymentStatus: "failed" });
-      console.error(
-        `Payment amount mismatch for reference ${reference}: expected ${expectedAmountKobo}, got ${transaction.amount}`,
-      );
-      return res.status(400).json({ message: "Payment amount mismatch" });
+    if (result.alreadyProcessed) {
+      return res.status(200).json({ message: "Payment already verified", orders: result.orders });
     }
 
-    for (const order of orders) {
-      order.paymentStatus = "success";
-      order.status = "paid";
-      order.paidAt = new Date();
-      await order.save();
-
-      // Every order includes delivery — spin it up now, per vendor. A
-      // failure here must not undo a payment that already succeeded; it's
-      // logged for manual follow-up instead.
-      try {
-        await createDeliveryForOrder(order);
-      } catch (deliveryError) {
-        console.error("Auto-create delivery error:", deliveryError);
-      }
-    }
-
-    return res.status(200).json({ message: "Payment verified successfully", orders });
+    return res.status(200).json({ message: "Payment verified successfully", orders: result.orders });
   } catch (error) {
     console.error("Verify payment error:", error);
     return res.status(500).json({ message: "Server error" });
@@ -383,8 +367,21 @@ const updateOrderStatus = async (req, res) => {
     }
 
     order.status = status;
-    if (status === "cancelled") order.cancelledAt = new Date();
+    if (status === "cancelled") {
+      order.cancelledAt = new Date();
+      await DeliveryModel.findOneAndUpdate(
+        { order: order._id, status: { $in: ["pending", "accepted"] } },
+        { status: "cancelled" }
+      );
+    }
     await order.save();
+
+    // Notify Buyer of order status change
+    notify({
+      recipientId: order.buyer,
+      template: TEMPLATES.ORDER_STATUS_UPDATE(status),
+      data: { orderId: order._id.toString(), status },
+    });
 
     return res.status(200).json({ message: "Order status updated", order });
   } catch (error) {
@@ -418,7 +415,27 @@ const cancelOrder = async (req, res) => {
     if (reason) order.cancelReason = reason;
     await order.save();
 
+    await DeliveryModel.findOneAndUpdate(
+      { order: order._id, status: { $in: ["pending", "accepted"] } },
+      { status: "cancelled" }
+    );
+
+    // Notify Buyer
+    notify({
+      recipientId: order.buyer,
+      template: TEMPLATES.ORDER_CANCELLED_BUYER(),
+      data: { orderId: order._id.toString() },
+    });
+
+    // Notify Vendor
+    notify({
+      recipientId: order.vendor,
+      template: TEMPLATES.ORDER_CANCELLED_VENDOR(),
+      data: { orderId: order._id.toString() },
+    });
+
     return res.status(200).json({ message: "Order cancelled", order });
+
   } catch (error) {
     console.error("Cancel order error:", error);
     return res.status(500).json({ message: "Server error" });

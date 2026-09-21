@@ -2,6 +2,7 @@ const ReviewModel = require("../../models/Review");
 const OrderModel = require("../../models/Order");
 const UserModel = require("../../models/User");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 // Recomputes a vendor's denormalized rating from their currently-visible
 // reviews. Called after any write that can change what's visible (create,
@@ -74,6 +75,17 @@ const createReview = async (req, res) => {
     });
 
     await recomputeVendorRating(order.vendor);
+
+    // Notify Vendor of new review
+    const reviewerName = req.user.firstName
+      ? `${req.user.firstName} ${req.user.lastName || ""}`.trim()
+      : "A customer";
+    notify({
+      recipientId: order.vendor,
+      template: TEMPLATES.NEW_REVIEW_VENDOR(reviewerName),
+      data: { reviewId: review._id.toString(), orderId: order._id.toString() },
+      senderId: req.user._id,
+    });
 
     return res.status(201).json({ message: "Review submitted", review });
   } catch (error) {

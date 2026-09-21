@@ -1,5 +1,6 @@
 const UserModel = require("../../models/User");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const listPendingVendors = async (req, res) => {
   try {
@@ -62,6 +63,11 @@ const approveVendor = async (req, res) => {
 
     await user.save();
 
+    notify({
+      recipientId: user._id,
+      template: TEMPLATES.VENDOR_APPLICATION_APPROVED(),
+    });
+
     return res.status(200).json({
       message: "Vendor application approved",
       user: {
@@ -95,6 +101,11 @@ const rejectVendor = async (req, res) => {
     user.vendorStatus = "rejected";
 
     await user.save();
+
+    notify({
+      recipientId: user._id,
+      template: TEMPLATES.VENDOR_APPLICATION_REJECTED(),
+    });
 
     return res.status(200).json({
       message: "Vendor application rejected",

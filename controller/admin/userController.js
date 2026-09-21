@@ -3,6 +3,7 @@ const OrderModel = require("../../models/Order");
 const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { sendPasswordResetOtp } = require("../auth/resetPasswordController");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const listUsers = async (req, res) => {
   try {
@@ -78,6 +79,11 @@ const suspendUser = async (req, res) => {
     user.refreshToken = null;
     await user.save();
 
+    notify({
+      recipientId: user._id,
+      template: TEMPLATES.ACCOUNT_SUSPENDED(),
+    });
+
     return res.status(200).json({ message: "User suspended", user });
   } catch (error) {
     console.error("Suspend user error:", error);
@@ -103,6 +109,11 @@ const unsuspendUser = async (req, res) => {
     user.suspendedAt = undefined;
     user.suspendReason = undefined;
     await user.save();
+
+    notify({
+      recipientId: user._id,
+      template: TEMPLATES.ACCOUNT_UNSUSPENDED(),
+    });
 
     return res.status(200).json({ message: "User unsuspended", user });
   } catch (error) {

@@ -12,7 +12,16 @@ const getUserProfile = async (req, res) => {
 };
 
 const updateProfile = async (req, res) => {
-  const { firstName, lastName, phoneNumber, businessName, businessAddress, storeDescription, notificationsEnabled } = req.body;
+  const {
+    firstName,
+    lastName,
+    phoneNumber,
+    businessName,
+    businessAddress,
+    storeDescription,
+    notificationsEnabled,
+    notificationPrefs,
+  } = req.body;
 
   try {
     const user = await UserModel.findById(req.user._id);
@@ -32,6 +41,24 @@ const updateProfile = async (req, res) => {
     if (firstName !== undefined) user.firstName = firstName;
     if (lastName !== undefined) user.lastName = lastName;
     if (notificationsEnabled !== undefined) user.notificationsEnabled = notificationsEnabled;
+
+    if (notificationPrefs && typeof notificationPrefs === "object") {
+      if (!user.notificationPrefs) {
+        user.notificationPrefs = { orders: true, deliveries: true, wallet: true, promotions: true };
+      }
+      if (typeof notificationPrefs.orders === "boolean") {
+        user.notificationPrefs.orders = notificationPrefs.orders;
+      }
+      if (typeof notificationPrefs.deliveries === "boolean") {
+        user.notificationPrefs.deliveries = notificationPrefs.deliveries;
+      }
+      if (typeof notificationPrefs.wallet === "boolean") {
+        user.notificationPrefs.wallet = notificationPrefs.wallet;
+      }
+      if (typeof notificationPrefs.promotions === "boolean") {
+        user.notificationPrefs.promotions = notificationPrefs.promotions;
+      }
+    }
 
     // Vendor-only fields — editing an existing vendor profile, not applying to become one.
     if (user.role === "vendor") {
