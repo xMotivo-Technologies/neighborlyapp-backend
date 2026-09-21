@@ -3,6 +3,9 @@ const WithdrawalModel = require("../../models/Withdrawal");
 const VendorWithdrawalModel = require("../../models/VendorWithdrawal");
 const { applyWalletEntry } = require("../../utils/walletLedger");
 const { applyVendorWalletEntry } = require("../../utils/vendorWalletLedger");
+const { finalizeOrderPayment } = require("../../utils/orderPayment");
+const { resolveUserIdForRider } = require("../../utils/riderHelper");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const TERMINAL_STATUSES = ["approved", "rejected", "failed"];
 
@@ -28,9 +31,19 @@ const finalizeRiderWithdrawal = async (withdrawal, outcome, paystackData) => {
   withdrawal.paystackStatus = paystackData.status;
   withdrawal.transferCode = paystackData.transfer_code || withdrawal.transferCode;
 
+  const riderUserId = await resolveUserIdForRider(withdrawal.rider);
+
   if (outcome === "success") {
     withdrawal.status = "approved";
     await withdrawal.save();
+
+    if (riderUserId) {
+      notify({
+        recipientId: riderUserId,
+        template: TEMPLATES.RIDER_WITHDRAWAL_APPROVED(),
+        data: { withdrawalId: withdrawal._id.toString() },
+      });
+    }
     return;
   }
 
@@ -46,6 +59,14 @@ const finalizeRiderWithdrawal = async (withdrawal, outcome, paystackData) => {
   withdrawal.status = "failed";
   withdrawal.failureReason = paystackData.message || "Transfer failed";
   await withdrawal.save();
+
+  if (riderUserId) {
+    notify({
+      recipientId: riderUserId,
+      template: TEMPLATES.RIDER_WITHDRAWAL_FAILED(),
+      data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason },
+    });
+  }
 };
 
 const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
@@ -57,6 +78,12 @@ const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
   if (outcome === "success") {
     withdrawal.status = "approved";
     await withdrawal.save();
+
+    notify({
+      recipientId: withdrawal.vendor,
+      template: TEMPLATES.VENDOR_WITHDRAWAL_APPROVED(),
+      data: { withdrawalId: withdrawal._id.toString() },
+    });
     return;
   }
 
@@ -72,6 +99,12 @@ const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
   withdrawal.status = "failed";
   withdrawal.failureReason = paystackData.message || "Transfer failed";
   await withdrawal.save();
+
+  notify({
+    recipientId: withdrawal.vendor,
+    template: TEMPLATES.VENDOR_WITHDRAWAL_FAILED(),
+    data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason },
+  });
 };
 
 // Requires req.rawBody (captured by the express.json verify callback in
@@ -94,7 +127,14 @@ const handlePaystackWebhook = async (req, res) => {
   const event = req.body;
 
   try {
-    if (event.event === "transfer.success") {
+    if (event.event === "charge.success") {
+      if (event.data?.status === "success" && event.data?.reference) {
+        await finalizeOrderPayment({
+          paymentReference: event.data.reference,
+          transactionData: event.data,
+        });
+      }
+    } else if (event.event === "transfer.success") {
       await finalizeWithdrawalTransfer(event.data.reference, "success", event.data);
     } else if (event.event === "transfer.failed" || event.event === "transfer.reversed") {
       await finalizeWithdrawalTransfer(event.data.reference, "failed", event.data);

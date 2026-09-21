@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
-const DELIVERY_STATUSES = ["pending", "accepted", "picked_up", "in_transit", "delivered", "confirmed"];
+const DELIVERY_STATUSES = ["pending", "accepted", "picked_up", "in_transit", "delivered", "confirmed", "cancelled"];
 
 const DeliverySchema = new Schema(
   {

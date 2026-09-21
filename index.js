@@ -46,6 +46,8 @@ app.use("/api", require("./routes/webhook/webhookRoute"));
 app.use("/api", require("./routes/review/reviewRoute"));
 app.use("/api", require("./routes/report/reportRoute"));
 app.use("/api", require("./routes/user/profile/profileRoute"));
+app.use("/api", require("./routes/device/deviceRoute"));
+app.use("/api", require("./routes/notification/notificationRoute"));
 app.use("/api/admin", require("./routes/admin/authRoute"));
 app.use("/api/admin", require("./routes/admin/vendorRoute"));
 app.use("/api/admin", require("./routes/admin/riderRoute"));
@@ -58,6 +60,7 @@ app.use("/api/admin", require("./routes/admin/reportRoute"));
 app.use("/api/admin", require("./routes/admin/dashboardRoute"));
 app.use("/api/admin", require("./routes/admin/userRoute"));
 app.use("/api/admin", require("./routes/admin/productRoute"));
+app.use("/api/admin", require("./routes/admin/notificationRoute"));
 
 
 // Test route
@@ -73,3 +76,18 @@ const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
+// Push notification receipts reconciliation cron (runs every 30 mins)
+if (process.env.NOTIFICATION_CRON !== "false") {
+  const cron = require("node-cron");
+  const { checkReceipts } = require("./services/notificationService");
+
+  cron.schedule("*/30 * * * *", async () => {
+    try {
+      await checkReceipts();
+    } catch (cronError) {
+      console.error("Receipt check cron job error:", cronError);
+    }
+  });
+}
+

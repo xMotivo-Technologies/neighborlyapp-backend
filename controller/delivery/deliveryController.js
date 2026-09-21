@@ -6,6 +6,7 @@ const { haversineDistanceKm, estimateDeliveryFee, estimateDurationMinutes } = re
 const { applyWalletEntry } = require("../../utils/walletLedger");
 const { applyVendorWalletEntry } = require("../../utils/vendorWalletLedger");
 const { getPlatformSettings } = require("../../utils/platformSettings");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const RIDER_SETTABLE_STATUSES = ["picked_up", "in_transit", "delivered"];
 
@@ -117,6 +118,21 @@ const acceptDelivery = async (req, res) => {
       console.error("Order status sync error (accept):", syncError);
     }
 
+    // Notify Rider
+    notify({
+      recipientId: req.user._id,
+      template: TEMPLATES.RIDER_DELIVERY_ACCEPTED(),
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+    });
+
+    // Notify Buyer
+    const riderName = req.user.firstName ? `${req.user.firstName} ${req.user.lastName || ""}`.trim() : "A rider";
+    notify({
+      recipientId: delivery.buyer,
+      template: TEMPLATES.DELIVERY_ACCEPTED(riderName),
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+    });
+
     return res.status(200).json({ message: "Delivery accepted", delivery });
   } catch (error) {
     console.error("Accept delivery error:", error);
@@ -148,7 +164,23 @@ const getDeliveryById = async (req, res) => {
       return res.status(403).json({ message: "You cannot view this delivery" });
     }
 
-    return res.status(200).json({ delivery });
+    // If caller is the rider, strip product prices so riders do not see product prices
+    let deliveryObj = delivery.toObject();
+    if (delivery.rider && delivery.rider._id.toString() === userId) {
+      if (deliveryObj.order) {
+        delete deliveryObj.order.totalAmount;
+        delete deliveryObj.order.subtotal;
+        delete deliveryObj.order.productPrice;
+        if (Array.isArray(deliveryObj.order.items)) {
+          deliveryObj.order.items = deliveryObj.order.items.map((item) => {
+            const { unitPrice, price, lineTotal, totalAmount, ...rest } = item;
+            return rest;
+          });
+        }
+      }
+    }
+
+    return res.status(200).json({ delivery: deliveryObj });
   } catch (error) {
     console.error("Get delivery error:", error);
     return res.status(500).json({ message: "Server error" });
@@ -192,6 +224,32 @@ const updateDeliveryStatus = async (req, res) => {
       }
     } catch (syncError) {
       console.error("Order status sync error (status):", syncError);
+    }
+
+    // Trigger delivery status notifications
+    if (status === "picked_up") {
+      notify({
+        recipientId: delivery.buyer,
+        template: TEMPLATES.DELIVERY_PICKED_UP(),
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      });
+      notify({
+        recipientId: delivery.vendor,
+        template: TEMPLATES.VENDOR_DELIVERY_PICKED_UP(),
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      });
+    } else if (status === "in_transit") {
+      notify({
+        recipientId: delivery.buyer,
+        template: TEMPLATES.DELIVERY_IN_TRANSIT(),
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      });
+    } else if (status === "delivered") {
+      notify({
+        recipientId: delivery.buyer,
+        template: TEMPLATES.DELIVERY_DELIVERED(),
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      });
     }
 
     return res.status(200).json({ message: "Delivery status updated", delivery });
@@ -247,6 +305,13 @@ const confirmDelivery = async (req, res) => {
             idempotencyKey: `earning_${delivery._id}`,
             delivery: delivery._id,
           });
+
+          // Notify Rider of wallet credit
+          notify({
+            recipientId: delivery.rider,
+            template: TEMPLATES.RIDER_WALLET_CREDIT(),
+            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+          });
         }
       } catch (walletError) {
         console.error("Credit rider wallet error:", walletError);
@@ -263,10 +328,24 @@ const confirmDelivery = async (req, res) => {
           idempotencyKey: `vendor_earning_${order._id}`,
           order: order._id,
         });
+
+        // Notify Vendor of wallet credit
+        notify({
+          recipientId: order.vendor,
+          template: TEMPLATES.VENDOR_WALLET_CREDIT(),
+          data: { orderId: order._id.toString() },
+        });
       } catch (walletError) {
         console.error("Credit vendor wallet error:", walletError);
       }
     }
+
+    // Notify Buyer of confirmed receipt
+    notify({
+      recipientId: delivery.buyer,
+      template: TEMPLATES.DELIVERY_CONFIRMED_BUYER(),
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+    });
 
     return res.status(200).json({ message: "Delivery confirmed", delivery });
   } catch (error) {

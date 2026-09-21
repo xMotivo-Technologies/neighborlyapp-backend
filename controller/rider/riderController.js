@@ -203,14 +203,25 @@ const getAvailableDeliveries = async (req, res) => {
 
     const [deliveries, total] = await Promise.all([
       DeliveryModel.find(findFilter)
-        .populate("order", "items totalAmount")
+        .populate("order", "items")
         .skip(skip)
         .limit(limit),
       DeliveryModel.countDocuments(countFilter),
     ]);
 
+    const sanitizedDeliveries = deliveries.map((d) => {
+      const obj = d.toObject();
+      if (obj.order?.items && Array.isArray(obj.order.items)) {
+        obj.order.items = obj.order.items.map((item) => {
+          const { unitPrice, price, lineTotal, totalAmount, ...rest } = item;
+          return rest;
+        });
+      }
+      return obj;
+    });
+
     return res.status(200).json({
-      data: deliveries,
+      data: sanitizedDeliveries,
       pagination: buildPaginationMeta({ page, limit, total }),
     });
   } catch (error) {
@@ -234,7 +245,7 @@ const getDeliveryHistory = async (req, res) => {
 
     const [deliveries, total] = await Promise.all([
       DeliveryModel.find(filter)
-        .populate("order", "items totalAmount")
+        .populate("order", "items")
         .populate("buyer", "firstName lastName")
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -242,8 +253,19 @@ const getDeliveryHistory = async (req, res) => {
       DeliveryModel.countDocuments(filter),
     ]);
 
+    const sanitizedDeliveries = deliveries.map((d) => {
+      const obj = d.toObject();
+      if (obj.order?.items && Array.isArray(obj.order.items)) {
+        obj.order.items = obj.order.items.map((item) => {
+          const { unitPrice, price, lineTotal, totalAmount, ...rest } = item;
+          return rest;
+        });
+      }
+      return obj;
+    });
+
     return res.status(200).json({
-      data: deliveries,
+      data: sanitizedDeliveries,
       pagination: buildPaginationMeta({ page, limit, total }),
     });
   } catch (error) {

@@ -81,6 +81,12 @@ const userSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    notificationPrefs: {
+      orders: { type: Boolean, default: true },
+      deliveries: { type: Boolean, default: true },
+      wallet: { type: Boolean, default: true },
+      promotions: { type: Boolean, default: true },
+    },
 
     // Vendor-specific fields
     businessName: { type: String },

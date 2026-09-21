@@ -3,6 +3,7 @@ const RiderModel = require("../../models/Rider");
 const WalletTransactionModel = require("../../models/WalletTransaction");
 const WithdrawalModel = require("../../models/Withdrawal");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const MINIMUM_WITHDRAWAL_AMOUNT = 500;
 
@@ -103,6 +104,14 @@ const requestWithdrawal = async (req, res) => {
 
       withdrawal = createdWithdrawal;
     });
+
+    if (withdrawal) {
+      notify({
+        recipientId: req.user._id,
+        template: TEMPLATES.RIDER_WITHDRAWAL_REQUESTED(),
+        data: { withdrawalId: withdrawal._id.toString() },
+      });
+    }
 
     return res.status(201).json({ message: "Withdrawal requested and pending admin approval", withdrawal });
   } catch (error) {

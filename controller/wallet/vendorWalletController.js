@@ -4,6 +4,7 @@ const VendorWalletTransactionModel = require("../../models/VendorWalletTransacti
 const VendorWithdrawalModel = require("../../models/VendorWithdrawal");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { listBanks, resolveAccountNumber } = require("../../utils/paystack");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const MINIMUM_WITHDRAWAL_AMOUNT = 500;
 
@@ -150,6 +151,14 @@ const requestWithdrawal = async (req, res) => {
 
       withdrawal = createdWithdrawal;
     });
+
+    if (withdrawal) {
+      notify({
+        recipientId: req.user._id,
+        template: TEMPLATES.VENDOR_WITHDRAWAL_REQUESTED(),
+        data: { withdrawalId: withdrawal._id.toString() },
+      });
+    }
 
     return res.status(201).json({ message: "Withdrawal requested and pending admin approval", withdrawal });
   } catch (error) {

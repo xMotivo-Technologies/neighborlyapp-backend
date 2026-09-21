@@ -66,8 +66,12 @@ const handleLogin = async (req, res) => {
   }
 };
 
+const DeviceTokenModel = require("../../models/DeviceToken");
+
 const handleLogout = async (req, res) => {
-  const { refreshToken } = req.body;
+  const { refreshToken, pushToken, token } = req.body;
+  const expoToken = pushToken || token;
+
   try {
     if (!refreshToken) {
       return res.status(400).json({ message: "Refresh Token is required" });
@@ -78,10 +82,17 @@ const handleLogout = async (req, res) => {
       .select("+refreshToken");
 
     if (!userDoc) {
+      if (expoToken) {
+        await DeviceTokenModel.deleteOne({ token: expoToken });
+      }
       return res.status(200).json({ message: "Logged out successfully" });
     }
 
     userDoc.refreshToken = null;
+    if (expoToken) {
+      userDoc.expoTokens = (userDoc.expoTokens || []).filter((t) => t !== expoToken);
+      await DeviceTokenModel.deleteOne({ token: expoToken, user: userDoc._id });
+    }
     await userDoc.save();
 
     return res.status(200).json({ message: "Logged out successfully" });

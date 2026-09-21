@@ -1,5 +1,6 @@
 const RiderModel = require("../../models/Rider");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
+const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const listRiders = async (req, res) => {
   try {
@@ -57,6 +58,11 @@ const approveRider = async (req, res) => {
     rider.suspendReason = undefined;
     await rider.save();
 
+    notify({
+      recipientId: rider.user,
+      template: TEMPLATES.RIDER_APPLICATION_APPROVED(),
+    });
+
     return res.status(200).json({ message: "Rider approved", rider });
   } catch (error) {
     console.error("Approve rider error:", error);
@@ -80,6 +86,11 @@ const suspendRider = async (req, res) => {
     rider.suspendedAt = new Date();
     if (reason) rider.suspendReason = reason;
     await rider.save();
+
+    notify({
+      recipientId: rider.user,
+      template: TEMPLATES.RIDER_APPLICATION_SUSPENDED(),
+    });
 
     return res.status(200).json({ message: "Rider suspended", rider });
   } catch (error) {
