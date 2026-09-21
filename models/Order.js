@@ -28,7 +28,7 @@ const OrderItemSchema = new Schema(
 const OrderSchema = new Schema(
   {
     // Shared by every sibling Order created from the same checkout.
-    orderGroup: { type: String, required: true, index: true },
+    orderGroup: { type: String, required: true },
 
     buyer: {
       type: Schema.Types.ObjectId,

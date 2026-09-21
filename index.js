@@ -52,6 +52,7 @@ app.use("/api/admin", require("./routes/admin/riderRoute"));
 app.use("/api/admin", require("./routes/admin/withdrawalRoute"));
 app.use("/api/admin", require("./routes/admin/vendorWithdrawalRoute"));
 app.use("/api/admin", require("./routes/admin/settingsRoute"));
+app.use("/api/admin", require("./routes/admin/advertPlanRoute"));
 app.use("/api/admin", require("./routes/admin/reviewRoute"));
 app.use("/api/admin", require("./routes/admin/reportRoute"));
 app.use("/api/admin", require("./routes/admin/dashboardRoute"));

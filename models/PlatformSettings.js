@@ -11,6 +11,13 @@ const PlatformSettingsSchema = new Schema(
     productCommissionPercent: { type: Number, required: true, default: 3, min: 0, max: 100 },
     // % of the delivery fee Neighborly keeps before paying the rider out.
     deliveryCommissionPercent: { type: Number, required: true, default: 15, min: 0, max: 100 },
+
+    // How far from a product's pickup point a boosted (advertised) product is
+    // shown to buyers. Read live wherever the nearby-adverts feed is built —
+    // NOT snapshotted onto an Advert — so changing it immediately affects
+    // every currently-running boost, not just future ones.
+    advertRadiusKm: { type: Number, required: true, default: 15, min: 0.1 },
+
     updatedBy: { type: Schema.Types.ObjectId, ref: "Admin" },
   },
   { timestamps: true },

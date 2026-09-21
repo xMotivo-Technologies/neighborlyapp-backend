@@ -11,11 +11,11 @@ const getSettings = async (req, res) => {
   }
 };
 
-// Only the two commission rates are editable here, and only by percent
-// (0-100) — the schema validates the range, this just rejects non-numbers
-// up front with a clear message.
+// Only these fields are editable here. Percent fields must be 0-100,
+// advertRadiusKm must be positive — the schema validates the same ranges,
+// this just rejects bad input up front with a clear message.
 const updateSettings = async (req, res) => {
-  const { productCommissionPercent, deliveryCommissionPercent } = req.body;
+  const { productCommissionPercent, deliveryCommissionPercent, advertRadiusKm } = req.body;
   const update = {};
 
   if (productCommissionPercent !== undefined) {
@@ -34,8 +34,18 @@ const updateSettings = async (req, res) => {
     update.deliveryCommissionPercent = value;
   }
 
+  if (advertRadiusKm !== undefined) {
+    const value = Number(advertRadiusKm);
+    if (!Number.isFinite(value) || value <= 0) {
+      return res.status(400).json({ message: "advertRadiusKm must be a positive number" });
+    }
+    update.advertRadiusKm = value;
+  }
+
   if (Object.keys(update).length === 0) {
-    return res.status(400).json({ message: "Provide at least one of productCommissionPercent, deliveryCommissionPercent" });
+    return res.status(400).json({
+      message: "Provide at least one of productCommissionPercent, deliveryCommissionPercent, advertRadiusKm",
+    });
   }
 
   update.updatedBy = req.admin._id;
