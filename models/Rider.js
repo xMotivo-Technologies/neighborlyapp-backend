@@ -11,11 +11,14 @@ const RiderSchema = new Schema(
     },
     vehicleType: {
       type: String,
-      enum: ["bicycle", "motorcycle", "car", "van"],
+      enum: ["bicycle", "motorcycle", "car", "van", "on_foot"],
       required: true,
     },
     vehiclePlateNumber: { type: String },
     licenseNumber: { type: String },
+    // National Identification Number. Required in place of a plate/license
+    // for on-foot riders, who have no vehicle to verify against.
+    nin: { type: String },
     status: {
       type: String,
       enum: ["pending", "approved", "suspended"],

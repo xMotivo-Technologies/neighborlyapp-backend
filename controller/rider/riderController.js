@@ -4,14 +4,23 @@ const { DELIVERY_STATUSES } = DeliveryModel;
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { listBanks, resolveAccountNumber } = require("../../utils/paystack");
 
-const VEHICLE_TYPES = ["bicycle", "motorcycle", "car", "van"];
+const VEHICLE_TYPES = ["bicycle", "motorcycle", "car", "van", "on_foot"];
 const EARTH_RADIUS_KM = 6378.1;
+// Deliveries are hidden from on-foot riders once the pickup-to-dropoff
+// distance exceeds a realistic walking trip.
+const WALKING_MAX_DISTANCE_KM = 3;
 
 const applyAsRider = async (req, res) => {
-  const { vehicleType, vehiclePlateNumber, licenseNumber } = req.body;
+  const { vehicleType, vehiclePlateNumber, licenseNumber, nin } = req.body;
 
   if (!vehicleType || !VEHICLE_TYPES.includes(vehicleType)) {
     return res.status(400).json({ message: `vehicleType must be one of: ${VEHICLE_TYPES.join(", ")}` });
+  }
+
+  // On-foot riders have no vehicle to verify, so an NIN stands in for the
+  // plate/license identity check other vehicle types go through.
+  if (vehicleType === "on_foot" && !nin) {
+    return res.status(400).json({ message: "nin is required for on-foot riders" });
   }
 
   try {
@@ -32,6 +41,7 @@ const applyAsRider = async (req, res) => {
     rider.vehicleType = vehicleType;
     rider.vehiclePlateNumber = vehiclePlateNumber;
     rider.licenseNumber = licenseNumber;
+    if (nin !== undefined) rider.nin = nin;
     rider.status = "pending";
     await rider.save();
 
@@ -73,7 +83,7 @@ const getBankOptions = async (req, res) => {
 };
 
 const updateRiderProfile = async (req, res) => {
-  const { vehicleType, vehiclePlateNumber, licenseNumber, accountNumber, bankCode } = req.body;
+  const { vehicleType, vehiclePlateNumber, licenseNumber, nin, accountNumber, bankCode } = req.body;
 
   if (vehicleType !== undefined && !VEHICLE_TYPES.includes(vehicleType)) {
     return res.status(400).json({ message: `vehicleType must be one of: ${VEHICLE_TYPES.join(", ")}` });
@@ -90,9 +100,16 @@ const updateRiderProfile = async (req, res) => {
       return res.status(404).json({ message: "Rider profile not found" });
     }
 
+    const effectiveVehicleType = vehicleType !== undefined ? vehicleType : rider.vehicleType;
+    const effectiveNin = nin !== undefined ? nin : rider.nin;
+    if (effectiveVehicleType === "on_foot" && !effectiveNin) {
+      return res.status(400).json({ message: "nin is required for on-foot riders" });
+    }
+
     if (vehicleType !== undefined) rider.vehicleType = vehicleType;
     if (vehiclePlateNumber !== undefined) rider.vehiclePlateNumber = vehiclePlateNumber;
     if (licenseNumber !== undefined) rider.licenseNumber = licenseNumber;
+    if (nin !== undefined) rider.nin = nin;
 
     // Bank details are always re-verified against Paystack here — the account
     // name shown/stored is never taken from the client's own say-so.
@@ -180,6 +197,12 @@ const getAvailableDeliveries = async (req, res) => {
     const radiusKm = parseFloat(req.query.radius) || 15;
 
     const baseFilter = { status: "pending", rider: null };
+    // On-foot riders can only realistically cover short pickup-to-dropoff
+    // trips, so cap the deliveries they're offered regardless of the
+    // requested search radius (which only measures rider-to-pickup distance).
+    if (req.rider.vehicleType === "on_foot") {
+      baseFilter.distanceKm = { $lte: WALKING_MAX_DISTANCE_KM };
+    }
     const hasLocation = req.rider.currentLocation?.coordinates?.length === 2;
 
     let findFilter = baseFilter;
