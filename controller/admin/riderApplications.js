@@ -61,6 +61,7 @@ const approveRider = async (req, res) => {
     notify({
       recipientId: rider.user,
       template: TEMPLATES.RIDER_APPLICATION_APPROVED(),
+      data: { riderId: rider._id.toString(), audience: "rider" },
     });
 
     return res.status(200).json({ message: "Rider approved", rider });
@@ -90,6 +91,7 @@ const suspendRider = async (req, res) => {
     notify({
       recipientId: rider.user,
       template: TEMPLATES.RIDER_APPLICATION_SUSPENDED(),
+      data: { riderId: rider._id.toString(), reason, audience: "rider" },
     });
 
     return res.status(200).json({ message: "Rider suspended", rider });

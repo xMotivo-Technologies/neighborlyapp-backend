@@ -66,6 +66,7 @@ const approveVendor = async (req, res) => {
     notify({
       recipientId: user._id,
       template: TEMPLATES.VENDOR_APPLICATION_APPROVED(),
+      data: { vendorId: user._id.toString(), audience: "vendor" },
     });
 
     return res.status(200).json({
@@ -105,6 +106,7 @@ const rejectVendor = async (req, res) => {
     notify({
       recipientId: user._id,
       template: TEMPLATES.VENDOR_APPLICATION_REJECTED(),
+      data: { vendorId: user._id.toString(), audience: "vendor" },
     });
 
     return res.status(200).json({

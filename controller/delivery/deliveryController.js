@@ -122,7 +122,7 @@ const acceptDelivery = async (req, res) => {
     notify({
       recipientId: req.user._id,
       template: TEMPLATES.RIDER_DELIVERY_ACCEPTED(),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "rider" },
     });
 
     // Notify Buyer
@@ -130,7 +130,7 @@ const acceptDelivery = async (req, res) => {
     notify({
       recipientId: delivery.buyer,
       template: TEMPLATES.DELIVERY_ACCEPTED(riderName),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
     });
 
     return res.status(200).json({ message: "Delivery accepted", delivery });
@@ -231,24 +231,24 @@ const updateDeliveryStatus = async (req, res) => {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_PICKED_UP(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
       notify({
         recipientId: delivery.vendor,
         template: TEMPLATES.VENDOR_DELIVERY_PICKED_UP(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "vendor" },
       });
     } else if (status === "in_transit") {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_IN_TRANSIT(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
     } else if (status === "delivered") {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_DELIVERED(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
     }
 
@@ -310,7 +310,7 @@ const confirmDelivery = async (req, res) => {
           notify({
             recipientId: delivery.rider,
             template: TEMPLATES.RIDER_WALLET_CREDIT(),
-            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "rider" },
           });
         }
       } catch (walletError) {
@@ -333,7 +333,7 @@ const confirmDelivery = async (req, res) => {
         notify({
           recipientId: order.vendor,
           template: TEMPLATES.VENDOR_WALLET_CREDIT(),
-          data: { orderId: order._id.toString() },
+          data: { orderId: order._id.toString(), audience: "vendor" },
         });
       } catch (walletError) {
         console.error("Credit vendor wallet error:", walletError);
@@ -344,7 +344,7 @@ const confirmDelivery = async (req, res) => {
     notify({
       recipientId: delivery.buyer,
       template: TEMPLATES.DELIVERY_CONFIRMED_BUYER(),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
     });
 
     return res.status(200).json({ message: "Delivery confirmed", delivery });

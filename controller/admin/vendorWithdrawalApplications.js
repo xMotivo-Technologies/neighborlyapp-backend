@@ -147,7 +147,7 @@ const approveWithdrawal = async (req, res) => {
       notify({
         recipientId: withdrawal.vendor,
         template: TEMPLATES.VENDOR_WITHDRAWAL_APPROVED(),
-        data: { withdrawalId: withdrawal._id.toString() },
+        data: { withdrawalId: withdrawal._id.toString(), audience: "vendor" },
       });
 
       return res.status(200).json({ message: "Withdrawal approved and transfer completed", withdrawal });
@@ -204,7 +204,7 @@ const rejectWithdrawal = async (req, res) => {
     notify({
       recipientId: withdrawal.vendor,
       template: TEMPLATES.VENDOR_WITHDRAWAL_REJECTED(reason),
-      data: { withdrawalId: withdrawal._id.toString(), reason },
+      data: { withdrawalId: withdrawal._id.toString(), reason, audience: "vendor" },
     });
 
     return res.status(200).json({ message: "Withdrawal rejected and funds returned to wallet", withdrawal });

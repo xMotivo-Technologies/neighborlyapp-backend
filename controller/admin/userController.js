@@ -82,6 +82,7 @@ const suspendUser = async (req, res) => {
     notify({
       recipientId: user._id,
       template: TEMPLATES.ACCOUNT_SUSPENDED(),
+      data: { audience: "buyer" },
     });
 
     return res.status(200).json({ message: "User suspended", user });
@@ -113,6 +114,7 @@ const unsuspendUser = async (req, res) => {
     notify({
       recipientId: user._id,
       template: TEMPLATES.ACCOUNT_UNSUSPENDED(),
+      data: { audience: "buyer" },
     });
 
     return res.status(200).json({ message: "User unsuspended", user });

@@ -147,7 +147,7 @@ const approveWithdrawal = async (req, res) => {
         notify({
           recipientId: riderUserId,
           template: TEMPLATES.RIDER_WITHDRAWAL_APPROVED(),
-          data: { withdrawalId: withdrawal._id.toString() },
+          data: { withdrawalId: withdrawal._id.toString(), audience: "rider" },
         });
       }
 
@@ -207,7 +207,7 @@ const rejectWithdrawal = async (req, res) => {
       notify({
         recipientId: riderUserId,
         template: TEMPLATES.RIDER_WITHDRAWAL_REJECTED(reason),
-        data: { withdrawalId: withdrawal._id.toString(), reason },
+        data: { withdrawalId: withdrawal._id.toString(), reason, audience: "rider" },
       });
     }
 

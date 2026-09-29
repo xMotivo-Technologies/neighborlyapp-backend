@@ -83,7 +83,7 @@ const createReview = async (req, res) => {
     notify({
       recipientId: order.vendor,
       template: TEMPLATES.NEW_REVIEW_VENDOR(reviewerName),
-      data: { reviewId: review._id.toString(), orderId: order._id.toString() },
+      data: { reviewId: review._id.toString(), orderId: order._id.toString(), audience: "vendor" },
       senderId: req.user._id,
     });
 

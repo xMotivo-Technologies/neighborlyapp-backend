@@ -380,7 +380,7 @@ const updateOrderStatus = async (req, res) => {
     notify({
       recipientId: order.buyer,
       template: TEMPLATES.ORDER_STATUS_UPDATE(status),
-      data: { orderId: order._id.toString(), status },
+      data: { orderId: order._id.toString(), status, audience: "buyer" },
     });
 
     return res.status(200).json({ message: "Order status updated", order });
@@ -424,14 +424,14 @@ const cancelOrder = async (req, res) => {
     notify({
       recipientId: order.buyer,
       template: TEMPLATES.ORDER_CANCELLED_BUYER(),
-      data: { orderId: order._id.toString() },
+      data: { orderId: order._id.toString(), audience: "buyer" },
     });
 
     // Notify Vendor
     notify({
       recipientId: order.vendor,
       template: TEMPLATES.ORDER_CANCELLED_VENDOR(),
-      data: { orderId: order._id.toString() },
+      data: { orderId: order._id.toString(), audience: "vendor" },
     });
 
     return res.status(200).json({ message: "Order cancelled", order });
