@@ -53,7 +53,7 @@ const getUserOrIpKey = (req) => {
 };
 
 const globalLimiter = rateLimit({
-  windowMs: minutes(15),
+  windowMs: minutes(1),
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
