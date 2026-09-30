@@ -29,6 +29,9 @@ const createReport = async (req, res) => {
       if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
+      if (product.vendor && product.vendor.toString() === req.user._id.toString()) {
+        return res.status(400).json({ message: "You cannot report your own product" });
+      }
     }
     // "conversation" targetId can't be validated — no conversation/messaging
     // model exists yet. Stored as-is for whenever that lands.
