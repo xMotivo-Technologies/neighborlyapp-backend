@@ -105,6 +105,9 @@ const getUserReviews = async (req, res) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
     const filter = { vendor: id, status: "visible" };
+    if (req.query.productId) {
+      filter.product = req.query.productId;
+    }
 
     const [reviews, total] = await Promise.all([
       ReviewModel.find(filter)

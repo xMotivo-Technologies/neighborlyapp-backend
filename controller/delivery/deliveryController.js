@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const DeliveryModel = require("../../models/Delivery");
 const OrderModel = require("../../models/Order");
 const ProductModel = require("../../models/Products");
@@ -264,9 +265,49 @@ const confirmDelivery = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const delivery = await DeliveryModel.findById(id);
+    let delivery = null;
+    if (mongoose.isValidObjectId(id)) {
+      delivery = await DeliveryModel.findOne({
+        $or: [{ _id: id }, { order: id }],
+      });
+    }
 
     if (!delivery) {
+      // Check if it's an order directly
+      if (mongoose.isValidObjectId(id)) {
+        const order = await OrderModel.findById(id);
+        if (order) {
+          if (order.buyer.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: "You cannot confirm this order" });
+          }
+          if (order.status === "completed") {
+            return res.status(200).json({ message: "Order is already completed", order });
+          }
+          order.status = "completed";
+          await order.save();
+
+          if (order.vendorEarning > 0) {
+            try {
+              await applyVendorWalletEntry({
+                vendorId: order.vendor,
+                type: "credit",
+                amount: order.vendorEarning,
+                reason: "order_earning",
+                idempotencyKey: `vendor_earning_${order._id}`,
+                order: order._id,
+              });
+              notify({
+                recipientId: order.vendor,
+                template: TEMPLATES.VENDOR_WALLET_CREDIT(),
+                data: { orderId: order._id.toString(), audience: "vendor" },
+              });
+            } catch (walletError) {
+              console.error("Credit vendor wallet error:", walletError);
+            }
+          }
+          return res.status(200).json({ message: "Delivery confirmed and order completed", order });
+        }
+      }
       return res.status(404).json({ message: "Delivery not found" });
     }
 
@@ -274,8 +315,8 @@ const confirmDelivery = async (req, res) => {
       return res.status(403).json({ message: "You cannot confirm this delivery" });
     }
 
-    if (delivery.status !== "delivered") {
-      return res.status(400).json({ message: "Delivery has not been marked as delivered yet" });
+    if (!["delivered", "in_transit", "picked_up", "shipped"].includes(delivery.status)) {
+      return res.status(400).json({ message: "Delivery has not been dispatched yet" });
     }
 
     delivery.status = "confirmed";

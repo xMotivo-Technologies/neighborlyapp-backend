@@ -329,7 +329,11 @@ const getOrderById = async (req, res) => {
       return res.status(403).json({ message: "You cannot view this order" });
     }
 
-    return res.status(200).json({ order });
+    const delivery = await DeliveryModel.findOne({ order: order._id }).populate("rider", "firstName lastName phoneNumber");
+    const orderObj = order.toObject();
+    orderObj.delivery = delivery || null;
+
+    return res.status(200).json({ order: orderObj });
   } catch (error) {
     console.error("Get order error:", error);
     return res.status(500).json({ message: "Server error" });
