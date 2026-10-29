@@ -1,12 +1,16 @@
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const connectDB = require("./config/dbConfig");
 const { globalLimiter } = require("./middleware/rateLimit");
+const { initSocket } = require("./utils/socket");
 
 require("dotenv").config();
 
 const app = express();
+
+const corsOrigins = ["http://localhost:5173", "http://localhost:5174"];
 
 // DB
 connectDB();
@@ -14,10 +18,7 @@ connectDB();
 // Middleware
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-    ],
+    origin: corsOrigins,
     credentials: true,
   }),
 );
@@ -34,6 +35,7 @@ app.use("/api", require("./routes/auth/loginRoute"));
 app.use("/api", require("./routes/auth/registerRoute"));
 app.use("/api", require("./routes/auth/resetPasswordRoute"));
 app.use("/api", require("./routes/vendor/becomeAVendorRoute"));
+app.use("/api", require("./routes/vendor/vendorAnalyticsRoute"));
 app.use("/api", require("./routes/product/productRoute"));
 app.use("/api", require("./routes/favorite/favoriteRoute"));
 app.use("/api", require("./routes/advert/advertRoute"));
@@ -46,8 +48,10 @@ app.use("/api", require("./routes/webhook/webhookRoute"));
 app.use("/api", require("./routes/review/reviewRoute"));
 app.use("/api", require("./routes/report/reportRoute"));
 app.use("/api", require("./routes/user/profile/profileRoute"));
+app.use("/api", require("./routes/user/profile/deleteUserRoute"));
 app.use("/api", require("./routes/device/deviceRoute"));
 app.use("/api", require("./routes/notification/notificationRoute"));
+app.use("/api", require("./routes/chat/chatRoute"));
 app.use("/api/admin", require("./routes/admin/authRoute"));
 app.use("/api/admin", require("./routes/admin/vendorRoute"));
 app.use("/api/admin", require("./routes/admin/riderRoute"));
@@ -70,10 +74,14 @@ app.get("/", (req, res) => {
   });
 });
 
-// Run server
+// Run server. A plain http.Server wraps the express app so Socket.io can
+// share the same port instead of needing a second listener/process.
 const port = process.env.PORT || 4000;
+const server = http.createServer(app);
 
-app.listen(port, () => {
+initSocket(server, { origin: corsOrigins, credentials: true });
+
+server.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
 
@@ -87,6 +95,27 @@ if (process.env.NOTIFICATION_CRON !== "false") {
       await checkReceipts();
     } catch (cronError) {
       console.error("Receipt check cron job error:", cronError);
+    }
+  });
+}
+
+// Delivery settlement sweep (runs once a day): auto-confirms deliveries a
+// buyer never confirmed, and retries any rider/vendor wallet credit that
+// previously failed. See autoConfirmStaleDeliveries/retryFailedDeliveryPayouts
+// in controller/delivery/deliveryController.js.
+if (process.env.DELIVERY_SETTLEMENT_CRON !== "false") {
+  const cron = require("node-cron");
+  const { autoConfirmStaleDeliveries, retryFailedDeliveryPayouts } = require("./controller/delivery/deliveryController");
+
+  cron.schedule("0 3 * * *", async () => {
+    try {
+      const autoConfirmed = await autoConfirmStaleDeliveries();
+      const { riderRetries, vendorRetries } = await retryFailedDeliveryPayouts();
+      console.log(
+        `Delivery settlement sweep: auto-confirmed ${autoConfirmed}, retried ${riderRetries} rider payout(s), ${vendorRetries} vendor payout(s)`,
+      );
+    } catch (cronError) {
+      console.error("Delivery settlement cron job error:", cronError);
     }
   });
 }

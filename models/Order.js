@@ -82,6 +82,18 @@ const OrderSchema = new Schema(
     paidAt: { type: Date },
     cancelledAt: { type: Date },
     cancelReason: { type: String },
+    // Set when a cancelled order's captured payment is refunded via Paystack
+    // (see refundOrderPayment in orderController.js). refundError is set
+    // instead when the refund call itself fails — the cancellation still
+    // goes through either way, so this is visible rather than silently lost.
+    refundedAt: { type: Date },
+    refundAmount: { type: Number, min: 0 },
+    refundReference: { type: String },
+    refundError: { type: String },
+    // Set when crediting the vendor's wallet throws in confirmDelivery/
+    // autoConfirmStaleDeliveries; cleared once a retry succeeds. Lets a
+    // sweep find and retry orders that were completed but never paid out.
+    vendorPayoutError: { type: String },
     deliveryAddress: { type: String, required: true },
     deliveryCoords: {
       type: {

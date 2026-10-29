@@ -35,6 +35,14 @@ const passwordResetRequestLimiter = rateLimit({
   message: { message: "Too many password reset requests, please try again later" },
 });
 
+const deleteAccountRequestLimiter = rateLimit({
+  windowMs: minutes(60),
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many account deletion requests, please try again later" },
+});
+
 // Keys by the authenticated user's id when a valid access token is present,
 // otherwise falls back to IP so anonymous requests are still bounded.
 const getUserOrIpKey = (req) => {
@@ -66,5 +74,6 @@ module.exports = {
   refreshLimiter,
   registerLimiter,
   passwordResetRequestLimiter,
+  deleteAccountRequestLimiter,
   globalLimiter,
 };

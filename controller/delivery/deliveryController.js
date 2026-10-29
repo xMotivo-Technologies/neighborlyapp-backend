@@ -9,6 +9,9 @@ const { getPlatformSettings } = require("../../utils/platformSettings");
 const { notify, TEMPLATES } = require("../../services/notificationService");
 
 const RIDER_SETTABLE_STATUSES = ["picked_up", "in_transit", "delivered"];
+// A buyer who never taps confirm would otherwise block the rider/vendor from
+// ever getting paid — autoConfirmStaleDeliveries sweeps past this deadline.
+const AUTO_CONFIRM_AFTER_DAYS = 3;
 
 // Called from the order controller once payment is verified. Distance/fee are
 // NOT recomputed here — they're taken from the order's own snapshot, which is
@@ -259,6 +262,94 @@ const updateDeliveryStatus = async (req, res) => {
   }
 };
 
+// Credits a rider's wallet for one delivery. Safe to call more than once
+// (applyWalletEntry is idempotent on idempotencyKey) — used both right after
+// confirmation and by retryFailedDeliveryPayouts to recover from a prior
+// failure. Persists/clears delivery.riderPayoutError so a failed credit is
+// visible and can be swept up for retry instead of only living in logs.
+const creditRiderForDelivery = async (delivery) => {
+  const riderEarning = delivery.riderEarning ?? delivery.fee;
+  if (!delivery.rider || !(riderEarning > 0)) return;
+
+  try {
+    const rider = await RiderModel.findOne({ user: delivery.rider });
+    if (!rider) return;
+
+    await applyWalletEntry({
+      riderId: rider._id,
+      type: "credit",
+      amount: riderEarning,
+      reason: "delivery_earning",
+      idempotencyKey: `earning_${delivery._id}`,
+      delivery: delivery._id,
+    });
+
+    if (delivery.riderPayoutError) {
+      delivery.riderPayoutError = undefined;
+      await delivery.save();
+    }
+
+    notify({
+      recipientId: delivery.rider,
+      template: TEMPLATES.RIDER_WALLET_CREDIT(),
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+    });
+  } catch (walletError) {
+    console.error("Credit rider wallet error:", walletError);
+    delivery.riderPayoutError = walletError.message;
+    await delivery.save().catch((saveError) => {
+      console.error("Persist riderPayoutError failed:", saveError);
+    });
+  }
+};
+
+// Mirrors creditRiderForDelivery for the vendor side of the same order.
+const creditVendorForOrder = async (order) => {
+  if (!order || !(order.vendorEarning > 0)) return;
+
+  try {
+    await applyVendorWalletEntry({
+      vendorId: order.vendor,
+      type: "credit",
+      amount: order.vendorEarning,
+      reason: "order_earning",
+      idempotencyKey: `vendor_earning_${order._id}`,
+      order: order._id,
+    });
+
+    if (order.vendorPayoutError) {
+      await OrderModel.findByIdAndUpdate(order._id, { $unset: { vendorPayoutError: 1 } });
+    }
+
+    notify({
+      recipientId: order.vendor,
+      template: TEMPLATES.VENDOR_WALLET_CREDIT(),
+      data: { orderId: order._id.toString() },
+    });
+  } catch (walletError) {
+    console.error("Credit vendor wallet error:", walletError);
+    await OrderModel.findByIdAndUpdate(order._id, { vendorPayoutError: walletError.message }).catch((saveError) => {
+      console.error("Persist vendorPayoutError failed:", saveError);
+    });
+  }
+};
+
+// Shared by confirmDelivery (buyer-triggered) and autoConfirmStaleDeliveries
+// (cron fallback) — marks the order completed and pays out rider + vendor.
+const settleConfirmedDelivery = async (delivery) => {
+  const order = await OrderModel.findByIdAndUpdate(delivery.order, { status: "completed" }, { new: true }).catch(
+    (syncError) => {
+      console.error("Order status sync error (settle):", syncError);
+      return null;
+    },
+  );
+
+  await creditRiderForDelivery(delivery);
+  await creditVendorForOrder(order);
+
+  return order;
+};
+
 // Buyer confirms receipt, which closes out both the delivery and the order.
 const confirmDelivery = async (req, res) => {
   const { id } = req.params;
@@ -282,63 +373,10 @@ const confirmDelivery = async (req, res) => {
     delivery.confirmedAt = new Date();
     await delivery.save();
 
-    const order = await OrderModel.findByIdAndUpdate(delivery.order, { status: "completed" }, { new: true }).catch(
-      (syncError) => {
-        console.error("Order status sync error (confirm):", syncError);
-        return null;
-      },
-    );
-
     // Rider and vendor are only paid once the buyer confirms receipt, not
     // merely when marked "delivered" — protects against a false claim of
     // delivery and against paying out on an order that turns out disputed.
-    const riderEarning = delivery.riderEarning ?? delivery.fee;
-    if (delivery.rider && riderEarning > 0) {
-      try {
-        const rider = await RiderModel.findOne({ user: delivery.rider });
-        if (rider) {
-          await applyWalletEntry({
-            riderId: rider._id,
-            type: "credit",
-            amount: riderEarning,
-            reason: "delivery_earning",
-            idempotencyKey: `earning_${delivery._id}`,
-            delivery: delivery._id,
-          });
-
-          // Notify Rider of wallet credit
-          notify({
-            recipientId: delivery.rider,
-            template: TEMPLATES.RIDER_WALLET_CREDIT(),
-            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
-          });
-        }
-      } catch (walletError) {
-        console.error("Credit rider wallet error:", walletError);
-      }
-    }
-
-    if (order?.vendorEarning > 0) {
-      try {
-        await applyVendorWalletEntry({
-          vendorId: order.vendor,
-          type: "credit",
-          amount: order.vendorEarning,
-          reason: "order_earning",
-          idempotencyKey: `vendor_earning_${order._id}`,
-          order: order._id,
-        });
-
-        // Notify Vendor of wallet credit
-        notify({
-          recipientId: order.vendor,
-          template: TEMPLATES.VENDOR_WALLET_CREDIT(),
-          data: { orderId: order._id.toString() },
-        });
-      } catch (walletError) {
-        console.error("Credit vendor wallet error:", walletError);
-      }
-    }
+    await settleConfirmedDelivery(delivery);
 
     // Notify Buyer of confirmed receipt
     notify({
@@ -352,6 +390,57 @@ const confirmDelivery = async (req, res) => {
     console.error("Confirm delivery error:", error);
     return res.status(500).json({ message: "Server error" });
   }
+};
+
+// Cron fallback (see index.js) for buyers who never tap confirm. Anything
+// still "delivered" after AUTO_CONFIRM_AFTER_DAYS is confirmed on their
+// behalf so the rider/vendor aren't stuck waiting on a silent buyer forever.
+const autoConfirmStaleDeliveries = async () => {
+  const cutoff = new Date(Date.now() - AUTO_CONFIRM_AFTER_DAYS * 24 * 60 * 60 * 1000);
+
+  const staleDeliveries = await DeliveryModel.find({ status: "delivered", deliveredAt: { $lte: cutoff } });
+
+  for (const delivery of staleDeliveries) {
+    try {
+      delivery.status = "confirmed";
+      delivery.confirmedAt = new Date();
+      delivery.autoConfirmed = true;
+      await delivery.save();
+
+      await settleConfirmedDelivery(delivery);
+
+      notify({
+        recipientId: delivery.buyer,
+        template: TEMPLATES.DELIVERY_AUTO_CONFIRMED_BUYER(),
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      });
+    } catch (error) {
+      console.error(`Auto-confirm delivery ${delivery._id} error:`, error);
+    }
+  }
+
+  return staleDeliveries.length;
+};
+
+// Cron fallback (see index.js) for the rarer case where confirmation
+// succeeded but crediting the rider/vendor wallet threw at the time — e.g. a
+// transient DB blip. Both wallet entries are idempotent on their
+// idempotencyKey, so retrying a payout that actually already landed is safe.
+const retryFailedDeliveryPayouts = async () => {
+  const [deliveriesToRetry, ordersToRetry] = await Promise.all([
+    DeliveryModel.find({ riderPayoutError: { $exists: true } }),
+    OrderModel.find({ vendorPayoutError: { $exists: true } }),
+  ]);
+
+  for (const delivery of deliveriesToRetry) {
+    await creditRiderForDelivery(delivery);
+  }
+
+  for (const order of ordersToRetry) {
+    await creditVendorForOrder(order);
+  }
+
+  return { riderRetries: deliveriesToRetry.length, vendorRetries: ordersToRetry.length };
 };
 
 const getDeliveryTracking = async (req, res) => {
@@ -403,4 +492,6 @@ module.exports = {
   updateDeliveryStatus,
   confirmDelivery,
   getDeliveryTracking,
+  autoConfirmStaleDeliveries,
+  retryFailedDeliveryPayouts,
 };

@@ -3,6 +3,7 @@ const FavoriteModel = require("../../models/Favorite");
 const ProductViewModel = require("../../models/ProductView");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { uploadImageBuffer } = require("../../utils/cloudinary");
+const { cancelActiveAdvertsForProduct } = require("../../utils/advertLifecycle");
 
 const EARTH_RADIUS_KM = 6378.1;
 const PRODUCT_STATUSES = ["active", "sold", "inactive"];
@@ -103,6 +104,15 @@ const editProduct = async (req, res) => {
 
     const imgUrl = await resolveImages(req);
 
+    // Changing what a listing actually shows is exactly what moderation
+    // reviewed in the first place — an approved product that gets its name,
+    // description, or images edited goes back to pending so it's re-reviewed
+    // rather than silently keeping its old approval on new content.
+    const contentChanged =
+      (imgUrl !== undefined && JSON.stringify(imgUrl) !== JSON.stringify(product.imgUrl)) ||
+      (name !== undefined && name !== product.name) ||
+      (desc !== undefined && desc !== product.desc);
+
     if (imgUrl !== undefined) product.imgUrl = imgUrl;
     if (name !== undefined) product.name = name;
     if (desc !== undefined) product.desc = desc;
@@ -116,7 +126,16 @@ const editProduct = async (req, res) => {
       product.locationCoords = { type: "Point", coordinates: [coords.lng, coords.lat] };
     }
 
+    const movedToPending = contentChanged && product.moderationStatus === "approved";
+    if (movedToPending) {
+      product.moderationStatus = "pending";
+    }
+
     await product.save();
+
+    if (movedToPending) {
+      await cancelActiveAdvertsForProduct(product._id);
+    }
 
     return res.status(200).json({
       message: "Product updated successfully",
@@ -151,6 +170,10 @@ const updateProductStatus = async (req, res) => {
 
     product.status = status;
     await product.save();
+
+    if (status !== "active") {
+      await cancelActiveAdvertsForProduct(product._id);
+    }
 
     return res.status(200).json({
       message: "Product status updated",
@@ -426,6 +449,15 @@ const getProductById = async (req, res) => {
     ).populate("vendor", "businessName businessAddress");
 
     if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // A rejected/pending/inactive listing is only visible to its own vendor
+    // (checking their own catalog) — everyone else gets the same 404 as a
+    // nonexistent product, rather than a leak that confirms it exists and
+    // was rejected.
+    const isOwner = req.user && product.vendor._id.toString() === req.user._id.toString();
+    if (!isOwner && (product.status !== "active" || product.moderationStatus !== "approved")) {
       return res.status(404).json({ message: "Product not found" });
     }
 

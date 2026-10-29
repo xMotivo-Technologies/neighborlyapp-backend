@@ -62,6 +62,16 @@ const userSchema = new Schema(
       type: Date,
       select: false,
     },
+    // Separate from otp/resetCodeExpires above so a live password-reset code
+    // can never be replayed to confirm account deletion (or vice versa).
+    deleteAccountOtp: {
+      type: String,
+      select: false,
+    },
+    deleteAccountOtpExpires: {
+      type: Date,
+      select: false,
+    },
     refreshToken: {
       type: String,
       select: false,
@@ -86,6 +96,7 @@ const userSchema = new Schema(
       deliveries: { type: Boolean, default: true },
       wallet: { type: Boolean, default: true },
       promotions: { type: Boolean, default: true },
+      messages: { type: Boolean, default: true },
     },
 
     // Vendor-specific fields

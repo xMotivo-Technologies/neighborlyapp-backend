@@ -64,6 +64,12 @@ const TEMPLATES = {
     channelId: "deliveries",
     type: "delivery",
   }),
+  DELIVERY_AUTO_CONFIRMED_BUYER: () => ({
+    title: "Order Completed",
+    body: "We've automatically marked your delivery as received since it's been a few days. Contact support if there was an issue.",
+    channelId: "deliveries",
+    type: "delivery",
+  }),
 
   // Seller (Vendor) Notifications
   NEW_ORDER_VENDOR: () => ({
@@ -201,6 +207,12 @@ const TEMPLATES = {
     body: "Your account suspension has been lifted. Welcome back!",
     channelId: "general",
     type: "account",
+  }),
+  NEW_MESSAGE: (senderName) => ({
+    title: "New Message",
+    body: `${senderName || "Someone"} sent you a message.`,
+    channelId: "messages",
+    type: "message",
   }),
   PROMOTION: (title, body) => ({
     title: title || "Special Offer! 🎁",

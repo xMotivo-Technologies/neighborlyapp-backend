@@ -67,6 +67,16 @@ const verifyTransferByReference = (reference) => {
   });
 };
 
+// amount is optional and in kobo — omit it for a full refund of the original
+// charge, or pass a sub-amount to refund only part of it (used when one
+// charge paid for several per-vendor orders and only one is cancelled).
+const createRefund = ({ transaction, amount, merchant_note }) => {
+  return paystackRequest("/refund", {
+    method: "POST",
+    body: JSON.stringify({ transaction, amount, merchant_note }),
+  });
+};
+
 module.exports = {
   initializeTransaction,
   verifyTransaction,
@@ -75,4 +85,5 @@ module.exports = {
   createTransferRecipient,
   initiateTransfer,
   verifyTransferByReference,
+  createRefund,
 };

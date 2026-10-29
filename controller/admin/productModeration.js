@@ -1,5 +1,6 @@
 const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
+const { cancelActiveAdvertsForProduct } = require("../../utils/advertLifecycle");
 
 const EDITABLE_FIELDS = [
   "name",
@@ -63,6 +64,10 @@ const updateProduct = async (req, res) => {
 
     await product.save();
 
+    if (product.status !== "active" || product.moderationStatus !== "approved") {
+      await cancelActiveAdvertsForProduct(product._id);
+    }
+
     return res.status(200).json({ message: "Product updated", product });
   } catch (error) {
     console.error("Admin update product error:", error);
@@ -84,6 +89,8 @@ const deleteProduct = async (req, res) => {
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
+
+    await cancelActiveAdvertsForProduct(product._id);
 
     return res.status(200).json({ message: "Product deleted" });
   } catch (error) {

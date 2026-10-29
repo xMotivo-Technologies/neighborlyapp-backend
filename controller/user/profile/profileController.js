@@ -44,7 +44,7 @@ const updateProfile = async (req, res) => {
 
     if (notificationPrefs && typeof notificationPrefs === "object") {
       if (!user.notificationPrefs) {
-        user.notificationPrefs = { orders: true, deliveries: true, wallet: true, promotions: true };
+        user.notificationPrefs = { orders: true, deliveries: true, wallet: true, promotions: true, messages: true };
       }
       if (typeof notificationPrefs.orders === "boolean") {
         user.notificationPrefs.orders = notificationPrefs.orders;
@@ -57,6 +57,9 @@ const updateProfile = async (req, res) => {
       }
       if (typeof notificationPrefs.promotions === "boolean") {
         user.notificationPrefs.promotions = notificationPrefs.promotions;
+      }
+      if (typeof notificationPrefs.messages === "boolean") {
+        user.notificationPrefs.messages = notificationPrefs.messages;
       }
     }
 

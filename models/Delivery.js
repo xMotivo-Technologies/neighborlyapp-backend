@@ -70,6 +70,13 @@ const DeliverySchema = new Schema(
     pickedUpAt: { type: Date },
     deliveredAt: { type: Date },
     confirmedAt: { type: Date },
+    // true when confirmed by the auto-confirm sweep rather than the buyer
+    // tapping confirm — see autoConfirmStaleDeliveries in deliveryController.
+    autoConfirmed: { type: Boolean, default: false },
+    // Set when crediting the rider's wallet throws in confirmDelivery/
+    // autoConfirmStaleDeliveries; cleared once a retry succeeds. Lets a
+    // sweep find and retry deliveries that were confirmed but never paid out.
+    riderPayoutError: { type: String },
   },
   { timestamps: true },
 );

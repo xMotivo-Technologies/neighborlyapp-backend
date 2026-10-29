@@ -52,31 +52,57 @@ const approveWithdrawal = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const withdrawal = await VendorWithdrawalModel.findById(id);
+    // Atomically claim this withdrawal before touching anything irreversible.
+    // Without this, two concurrent approve calls (double-click, retry, two
+    // admins) could both read status:"pending" and both go on to call
+    // Paystack — two real bank transfers for one withdrawal. Whoever loses
+    // this race gets null back and backs off before Paystack is ever called.
+    const withdrawal = await VendorWithdrawalModel.findOneAndUpdate(
+      { _id: id, status: "pending" },
+      { status: "processing", reviewedBy: req.admin._id, reviewedAt: new Date() },
+      { new: true },
+    );
 
     if (!withdrawal) {
-      return res.status(404).json({ message: "Withdrawal not found" });
-    }
-
-    if (withdrawal.status !== "pending") {
-      return res.status(400).json({ message: `Withdrawal is already ${withdrawal.status}` });
+      const existing = await VendorWithdrawalModel.findById(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Withdrawal not found" });
+      }
+      return res.status(409).json({ message: `Withdrawal is already ${existing.status}` });
     }
 
     const vendor = await UserModel.findById(withdrawal.vendor);
     if (!vendor) {
-      return res.status(404).json({ message: "Vendor not found" });
+      // Already claimed as "processing" above — must resolve it one way or
+      // the other rather than leaving it stuck there.
+      await reverseWithdrawalDebit(withdrawal);
+      withdrawal.status = "failed";
+      withdrawal.failureReason = "Vendor not found";
+      await withdrawal.save();
+      return res.status(404).json({ message: "Vendor not found, withdrawal reversed" });
     }
 
     let recipientCode = vendor.paystackRecipientCode;
     if (!recipientCode) {
-      const recipientResponse = await createTransferRecipient({
-        name: withdrawal.bankAccountName,
-        account_number: withdrawal.bankAccountNumber,
-        bank_code: withdrawal.bankCode,
-      });
-      recipientCode = recipientResponse.data.recipient_code;
-      vendor.paystackRecipientCode = recipientCode;
-      await vendor.save();
+      try {
+        const recipientResponse = await createTransferRecipient({
+          name: withdrawal.bankAccountName,
+          account_number: withdrawal.bankAccountNumber,
+          bank_code: withdrawal.bankCode,
+        });
+        recipientCode = recipientResponse.data.recipient_code;
+        vendor.paystackRecipientCode = recipientCode;
+        await vendor.save();
+      } catch (recipientError) {
+        console.error("Create transfer recipient error:", recipientError);
+        await reverseWithdrawalDebit(withdrawal);
+        withdrawal.status = "failed";
+        withdrawal.failureReason = recipientError.message;
+        await withdrawal.save();
+        return res
+          .status(502)
+          .json({ message: "Unable to set up payout recipient, withdrawal reversed", withdrawal });
+      }
     }
 
     // Persisted before calling Paystack so a retry after a crash reconciles
@@ -181,25 +207,25 @@ const rejectWithdrawal = async (req, res) => {
   const { reason } = req.body;
 
   try {
-    const withdrawal = await VendorWithdrawalModel.findById(id);
+    // Same atomic claim as approveWithdrawal — stops a reject racing another
+    // reject (or an approve) from both passing the pending-check.
+    const withdrawal = await VendorWithdrawalModel.findOneAndUpdate(
+      { _id: id, status: "pending" },
+      { status: "rejected", rejectionReason: reason, reviewedBy: req.admin._id, reviewedAt: new Date() },
+      { new: true },
+    );
 
     if (!withdrawal) {
-      return res.status(404).json({ message: "Withdrawal not found" });
-    }
-
-    if (withdrawal.status !== "pending") {
+      const existing = await VendorWithdrawalModel.findById(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Withdrawal not found" });
+      }
       return res.status(400).json({
-        message: `Only a pending withdrawal can be rejected (current status: ${withdrawal.status})`,
+        message: `Only a pending withdrawal can be rejected (current status: ${existing.status})`,
       });
     }
 
     await reverseWithdrawalDebit(withdrawal);
-
-    withdrawal.status = "rejected";
-    withdrawal.rejectionReason = reason;
-    withdrawal.reviewedBy = req.admin._id;
-    withdrawal.reviewedAt = new Date();
-    await withdrawal.save();
 
     notify({
       recipientId: withdrawal.vendor,

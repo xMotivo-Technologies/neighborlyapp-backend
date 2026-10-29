@@ -6,7 +6,10 @@ const { Schema } = mongoose;
 //   is `status === "active" && expiresAt > now`, checked at read time rather
 //   than flipped by a background job (see getUserAdverts).
 // failed: payment did not succeed.
-const ADVERT_STATUSES = ["pending_payment", "active", "failed"];
+// cancelled: stopped early because the boosted product became unsellable
+//   (rejected, marked sold/inactive, edited back to pending, or deleted) —
+//   see utils/advertLifecycle.js.
+const ADVERT_STATUSES = ["pending_payment", "active", "failed", "cancelled"];
 
 const AdvertSchema = new Schema(
   {
@@ -56,6 +59,8 @@ const AdvertSchema = new Schema(
     // Set once payment is confirmed (see verifyAdvertPayment).
     startAt: { type: Date },
     expiresAt: { type: Date },
+    // Set when cancelActiveAdvertsForProduct stops this boost early.
+    cancelledAt: { type: Date },
   },
   { timestamps: true },
 );

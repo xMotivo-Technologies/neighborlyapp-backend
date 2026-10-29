@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const OrderModel = require("../../models/Order");
 const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
-const { initializeTransaction, verifyTransaction } = require("../../utils/paystack");
+const { initializeTransaction, verifyTransaction, createRefund } = require("../../utils/paystack");
 const { haversineDistanceKm, estimateDeliveryFee } = require("../../utils/geo");
 const DeliveryModel = require("../../models/Delivery");
 const { createDeliveryForOrder } = require("../delivery/deliveryController");
@@ -55,6 +55,37 @@ class OrderValidationError extends Error {
   }
 }
 
+// Reverses Paystack's capture for this order's own share of the original
+// charge when a paid order is cancelled. A single checkout can span several
+// vendors sharing one paymentReference, so this refunds only this order's
+// totalAmount (its slice of that charge), not the whole transaction — never
+// more than what was actually captured for it.
+//
+// Mutates `order` in place and lets the caller's own save() persist it
+// alongside the cancellation, rather than saving separately here. Never
+// throws: a failed refund is recorded on refundError instead of blocking
+// the cancellation — the buyer is still entitled to cancel even if the
+// gateway call fails, and the failure stays visible for an admin to retry.
+const refundOrderPayment = async (order) => {
+  if (order.paymentStatus !== "success" || order.refundedAt) return;
+
+  try {
+    const refund = await createRefund({
+      transaction: order.paymentReference,
+      amount: Math.round(order.totalAmount * 100),
+      merchant_note: `Order ${order._id} cancelled`,
+    });
+
+    order.refundedAt = new Date();
+    order.refundAmount = order.totalAmount;
+    order.refundReference = refund?.data?.id ? String(refund.data.id) : undefined;
+    order.refundError = undefined;
+  } catch (refundError) {
+    console.error(`Refund order ${order._id} error:`, refundError);
+    order.refundError = refundError.message;
+  }
+};
+
 const createOrder = async (req, res) => {
   const { items, deliveryAddress, lat, lng } = req.body;
 
@@ -85,7 +116,7 @@ const createOrder = async (req, res) => {
     // problem with one vendor's items doesn't leave earlier orders orphaned.
     for (const vendorItems of groupsByVendor.values()) {
       for (const { product } of vendorItems) {
-        if (product.status !== "active") {
+        if (product.status !== "active" || product.moderationStatus !== "approved") {
           throw new OrderValidationError(400, `"${product.name}" is not available for purchase`);
         }
         if (product.vendor.toString() === req.user._id.toString()) {
@@ -369,6 +400,7 @@ const updateOrderStatus = async (req, res) => {
     order.status = status;
     if (status === "cancelled") {
       order.cancelledAt = new Date();
+      await refundOrderPayment(order);
       await DeliveryModel.findOneAndUpdate(
         { order: order._id, status: { $in: ["pending", "accepted"] } },
         { status: "cancelled" }
@@ -413,6 +445,7 @@ const cancelOrder = async (req, res) => {
     order.status = "cancelled";
     order.cancelledAt = new Date();
     if (reason) order.cancelReason = reason;
+    await refundOrderPayment(order);
     await order.save();
 
     await DeliveryModel.findOneAndUpdate(

@@ -40,6 +40,7 @@ const isChannelAllowed = (user, channelId) => {
   if (channelId === "deliveries" && user.notificationPrefs.deliveries === false) return false;
   if (channelId === "wallet" && user.notificationPrefs.wallet === false) return false;
   if (channelId === "promotions" && user.notificationPrefs.promotions === false) return false;
+  if (channelId === "messages" && user.notificationPrefs.messages === false) return false;
 
   return true;
 };
