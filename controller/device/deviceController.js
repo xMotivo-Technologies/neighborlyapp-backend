@@ -11,6 +11,7 @@ const registerDevice = async (req, res) => {
   }
 
   if (!Expo.isExpoPushToken(expoToken)) {
+    console.warn(`[DeviceController] Rejected non-Expo push token: "${expoToken}"`);
     return res.status(400).json({ message: "Invalid Expo push token" });
   }
 

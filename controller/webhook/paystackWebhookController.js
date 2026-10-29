@@ -41,7 +41,7 @@ const finalizeRiderWithdrawal = async (withdrawal, outcome, paystackData) => {
       notify({
         recipientId: riderUserId,
         template: TEMPLATES.RIDER_WITHDRAWAL_APPROVED(),
-        data: { withdrawalId: withdrawal._id.toString() },
+        data: { withdrawalId: withdrawal._id.toString(), audience: "rider" },
       });
     }
     return;
@@ -64,7 +64,7 @@ const finalizeRiderWithdrawal = async (withdrawal, outcome, paystackData) => {
     notify({
       recipientId: riderUserId,
       template: TEMPLATES.RIDER_WITHDRAWAL_FAILED(),
-      data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason },
+      data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason, audience: "rider" },
     });
   }
 };
@@ -82,7 +82,7 @@ const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
     notify({
       recipientId: withdrawal.vendor,
       template: TEMPLATES.VENDOR_WITHDRAWAL_APPROVED(),
-      data: { withdrawalId: withdrawal._id.toString() },
+      data: { withdrawalId: withdrawal._id.toString(), audience: "vendor" },
     });
     return;
   }
@@ -103,7 +103,7 @@ const finalizeVendorWithdrawal = async (withdrawal, outcome, paystackData) => {
   notify({
     recipientId: withdrawal.vendor,
     template: TEMPLATES.VENDOR_WITHDRAWAL_FAILED(),
-    data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason },
+    data: { withdrawalId: withdrawal._id.toString(), reason: withdrawal.failureReason, audience: "vendor" },
   });
 };
 

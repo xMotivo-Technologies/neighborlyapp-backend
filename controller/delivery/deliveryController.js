@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const DeliveryModel = require("../../models/Delivery");
 const OrderModel = require("../../models/Order");
 const ProductModel = require("../../models/Products");
@@ -125,7 +126,7 @@ const acceptDelivery = async (req, res) => {
     notify({
       recipientId: req.user._id,
       template: TEMPLATES.RIDER_DELIVERY_ACCEPTED(),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "rider" },
     });
 
     // Notify Buyer
@@ -133,7 +134,7 @@ const acceptDelivery = async (req, res) => {
     notify({
       recipientId: delivery.buyer,
       template: TEMPLATES.DELIVERY_ACCEPTED(riderName),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
     });
 
     return res.status(200).json({ message: "Delivery accepted", delivery });
@@ -234,24 +235,24 @@ const updateDeliveryStatus = async (req, res) => {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_PICKED_UP(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
       notify({
         recipientId: delivery.vendor,
         template: TEMPLATES.VENDOR_DELIVERY_PICKED_UP(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "vendor" },
       });
     } else if (status === "in_transit") {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_IN_TRANSIT(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
     } else if (status === "delivered") {
       notify({
         recipientId: delivery.buyer,
         template: TEMPLATES.DELIVERY_DELIVERED(),
-        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+        data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
       });
     }
 
@@ -355,9 +356,49 @@ const confirmDelivery = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const delivery = await DeliveryModel.findById(id);
+    let delivery = null;
+    if (mongoose.isValidObjectId(id)) {
+      delivery = await DeliveryModel.findOne({
+        $or: [{ _id: id }, { order: id }],
+      });
+    }
 
     if (!delivery) {
+      // Check if it's an order directly
+      if (mongoose.isValidObjectId(id)) {
+        const order = await OrderModel.findById(id);
+        if (order) {
+          if (order.buyer.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: "You cannot confirm this order" });
+          }
+          if (order.status === "completed") {
+            return res.status(200).json({ message: "Order is already completed", order });
+          }
+          order.status = "completed";
+          await order.save();
+
+          if (order.vendorEarning > 0) {
+            try {
+              await applyVendorWalletEntry({
+                vendorId: order.vendor,
+                type: "credit",
+                amount: order.vendorEarning,
+                reason: "order_earning",
+                idempotencyKey: `vendor_earning_${order._id}`,
+                order: order._id,
+              });
+              notify({
+                recipientId: order.vendor,
+                template: TEMPLATES.VENDOR_WALLET_CREDIT(),
+                data: { orderId: order._id.toString(), audience: "vendor" },
+              });
+            } catch (walletError) {
+              console.error("Credit vendor wallet error:", walletError);
+            }
+          }
+          return res.status(200).json({ message: "Delivery confirmed and order completed", order });
+        }
+      }
       return res.status(404).json({ message: "Delivery not found" });
     }
 
@@ -365,8 +406,8 @@ const confirmDelivery = async (req, res) => {
       return res.status(403).json({ message: "You cannot confirm this delivery" });
     }
 
-    if (delivery.status !== "delivered") {
-      return res.status(400).json({ message: "Delivery has not been marked as delivered yet" });
+    if (!["delivered", "in_transit", "picked_up", "shipped"].includes(delivery.status)) {
+      return res.status(400).json({ message: "Delivery has not been dispatched yet" });
     }
 
     delivery.status = "confirmed";
@@ -376,13 +417,59 @@ const confirmDelivery = async (req, res) => {
     // Rider and vendor are only paid once the buyer confirms receipt, not
     // merely when marked "delivered" — protects against a false claim of
     // delivery and against paying out on an order that turns out disputed.
-    await settleConfirmedDelivery(delivery);
+    const riderEarning = delivery.riderEarning ?? delivery.fee;
+    if (delivery.rider && riderEarning > 0) {
+      try {
+        const rider = await RiderModel.findOne({ user: delivery.rider });
+        if (rider) {
+          await applyWalletEntry({
+            riderId: rider._id,
+            type: "credit",
+            amount: riderEarning,
+            reason: "delivery_earning",
+            idempotencyKey: `earning_${delivery._id}`,
+            delivery: delivery._id,
+          });
+
+          // Notify Rider of wallet credit
+          notify({
+            recipientId: delivery.rider,
+            template: TEMPLATES.RIDER_WALLET_CREDIT(),
+            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+          });
+        }
+      } catch (walletError) {
+        console.error("Credit rider wallet error:", walletError);
+      }
+    }
+
+    if (order?.vendorEarning > 0) {
+      try {
+        await applyVendorWalletEntry({
+          vendorId: order.vendor,
+          type: "credit",
+          amount: order.vendorEarning,
+          reason: "order_earning",
+          idempotencyKey: `vendor_earning_${order._id}`,
+          order: order._id,
+        });
+
+        // Notify Vendor of wallet credit
+        notify({
+          recipientId: order.vendor,
+          template: TEMPLATES.VENDOR_WALLET_CREDIT(),
+          data: { orderId: order._id.toString() },
+        });
+      } catch (walletError) {
+        console.error("Credit vendor wallet error:", walletError);
+      }
+    }
 
     // Notify Buyer of confirmed receipt
     notify({
       recipientId: delivery.buyer,
       template: TEMPLATES.DELIVERY_CONFIRMED_BUYER(),
-      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
+      data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString(), audience: "buyer" },
     });
 
     return res.status(200).json({ message: "Delivery confirmed", delivery });

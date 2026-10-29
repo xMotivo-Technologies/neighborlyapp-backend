@@ -105,14 +105,14 @@ const finalizeOrderPayment = async ({ paymentReference, transactionData }) => {
         notify({
           recipientId: updatedOrder.buyer,
           template: TEMPLATES.PAYMENT_CONFIRMED(),
-          data: { orderId: updatedOrder._id.toString() },
+          data: { orderId: updatedOrder._id.toString(), audience: "buyer" },
         });
 
         // Notify Vendor of new customer order
         notify({
           recipientId: updatedOrder.vendor,
           template: TEMPLATES.NEW_ORDER_VENDOR(),
-          data: { orderId: updatedOrder._id.toString() },
+          data: { orderId: updatedOrder._id.toString(), audience: "vendor" },
         });
 
         // Broadcast to nearby available riders
@@ -123,6 +123,7 @@ const finalizeOrderPayment = async ({ paymentReference, transactionData }) => {
             data: {
               deliveryId: delivery._id.toString(),
               orderId: updatedOrder._id.toString(),
+              audience: "rider",
             },
           });
         }

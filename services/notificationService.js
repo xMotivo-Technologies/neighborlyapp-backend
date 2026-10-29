@@ -150,6 +150,7 @@ const notify = async ({ recipientId, template, data = {}, senderId = null }) => 
     const payload = resolvePayload(template);
 
     // 1. Persist in-app notification
+    const audience = data.audience || "buyer";
     const notification = await NotificationModel.create({
       recipient: recipientId,
       sender: senderId || null,
@@ -159,6 +160,7 @@ const notify = async ({ recipientId, template, data = {}, senderId = null }) => 
       channelId: payload.channelId,
       data: {
         ...data,
+        audience,
         type: payload.type,
         channelId: payload.channelId,
       },
@@ -197,6 +199,7 @@ const notify = async ({ recipientId, template, data = {}, senderId = null }) => 
             body: payload.body,
             data: {
               ...data,
+              audience,
               notificationId: notification._id.toString(),
               type: payload.type,
               channelId: payload.channelId,
@@ -237,6 +240,7 @@ const notifyMany = async ({ recipientIds, template, data = {}, senderId = null }
     const payload = resolvePayload(template);
 
     // 1. Bulk insert in-app notifications
+    const audience = data.audience || "buyer";
     const notificationDocs = uniqueIds.map((userId) => ({
       recipient: userId,
       sender: senderId || null,
@@ -246,6 +250,7 @@ const notifyMany = async ({ recipientIds, template, data = {}, senderId = null }
       channelId: payload.channelId,
       data: {
         ...data,
+        audience,
         type: payload.type,
         channelId: payload.channelId,
       },
@@ -300,6 +305,7 @@ const notifyMany = async ({ recipientIds, template, data = {}, senderId = null }
               body: payload.body,
               data: {
                 ...data,
+                audience,
                 type: payload.type,
                 channelId: payload.channelId,
               },
@@ -371,7 +377,7 @@ const broadcastToRiders = async ({
     if (!riders || riders.length === 0) return;
 
     const recipientIds = riders.map((r) => r.user).filter(Boolean);
-    await notifyMany({ recipientIds, template, data });
+    await notifyMany({ recipientIds, template, data: { ...data, audience: "rider" } });
   } catch (error) {
     console.error("[NotificationService] broadcastToRiders() error:", error);
   }

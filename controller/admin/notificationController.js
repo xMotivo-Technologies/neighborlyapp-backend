@@ -29,7 +29,7 @@ const sendPromotion = async (req, res) => {
     notifyMany({
       recipientIds: userIds,
       template: TEMPLATES.PROMOTION(title, content),
-      data: data || {},
+      data: { ...(data || {}), audience: data?.audience || "buyer" },
     }).catch((err) => {
       console.error("Bulk promotion dispatch error:", err);
     });

@@ -109,7 +109,7 @@ const requestWithdrawal = async (req, res) => {
       notify({
         recipientId: req.user._id,
         template: TEMPLATES.RIDER_WITHDRAWAL_REQUESTED(),
-        data: { withdrawalId: withdrawal._id.toString() },
+        data: { withdrawalId: withdrawal._id.toString(), audience: "rider" },
       });
     }
 
