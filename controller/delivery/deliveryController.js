@@ -377,25 +377,7 @@ const confirmDelivery = async (req, res) => {
           order.status = "completed";
           await order.save();
 
-          if (order.vendorEarning > 0) {
-            try {
-              await applyVendorWalletEntry({
-                vendorId: order.vendor,
-                type: "credit",
-                amount: order.vendorEarning,
-                reason: "order_earning",
-                idempotencyKey: `vendor_earning_${order._id}`,
-                order: order._id,
-              });
-              notify({
-                recipientId: order.vendor,
-                template: TEMPLATES.VENDOR_WALLET_CREDIT(),
-                data: { orderId: order._id.toString(), audience: "vendor" },
-              });
-            } catch (walletError) {
-              console.error("Credit vendor wallet error:", walletError);
-            }
-          }
+          await creditVendorForOrder(order);
           return res.status(200).json({ message: "Delivery confirmed and order completed", order });
         }
       }
@@ -417,53 +399,7 @@ const confirmDelivery = async (req, res) => {
     // Rider and vendor are only paid once the buyer confirms receipt, not
     // merely when marked "delivered" — protects against a false claim of
     // delivery and against paying out on an order that turns out disputed.
-    const riderEarning = delivery.riderEarning ?? delivery.fee;
-    if (delivery.rider && riderEarning > 0) {
-      try {
-        const rider = await RiderModel.findOne({ user: delivery.rider });
-        if (rider) {
-          await applyWalletEntry({
-            riderId: rider._id,
-            type: "credit",
-            amount: riderEarning,
-            reason: "delivery_earning",
-            idempotencyKey: `earning_${delivery._id}`,
-            delivery: delivery._id,
-          });
-
-          // Notify Rider of wallet credit
-          notify({
-            recipientId: delivery.rider,
-            template: TEMPLATES.RIDER_WALLET_CREDIT(),
-            data: { deliveryId: delivery._id.toString(), orderId: delivery.order.toString() },
-          });
-        }
-      } catch (walletError) {
-        console.error("Credit rider wallet error:", walletError);
-      }
-    }
-
-    if (order?.vendorEarning > 0) {
-      try {
-        await applyVendorWalletEntry({
-          vendorId: order.vendor,
-          type: "credit",
-          amount: order.vendorEarning,
-          reason: "order_earning",
-          idempotencyKey: `vendor_earning_${order._id}`,
-          order: order._id,
-        });
-
-        // Notify Vendor of wallet credit
-        notify({
-          recipientId: order.vendor,
-          template: TEMPLATES.VENDOR_WALLET_CREDIT(),
-          data: { orderId: order._id.toString() },
-        });
-      } catch (walletError) {
-        console.error("Credit vendor wallet error:", walletError);
-      }
-    }
+    await settleConfirmedDelivery(delivery);
 
     // Notify Buyer of confirmed receipt
     notify({

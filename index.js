@@ -10,7 +10,7 @@ require("dotenv").config();
 
 const app = express();
 
-const corsOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const corsOrigins = ["http://localhost:5173", "http://localhost:5174", "https://neighborly.ng"];
 
 // DB
 connectDB();
