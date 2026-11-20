@@ -8,22 +8,22 @@ const handleRegister = async (req, res) => {
 
   try {
     // 1. Check if user already exists (active or deleted)
-    const existingUser = await UserModel.findOne({
-      $or: [
-        { email: normalizedEmail },
-        { phoneNumber: phoneNumber },
-      ],
-    });
+    const orClauses = [{ email: normalizedEmail }];
+    if (phoneNumber) orClauses.push({ phoneNumber });
+
+    const existingUser = await UserModel.findOne({ $or: orClauses });
 
     // 2. If user exists
     if (existingUser) {
-      
+
       if (!existingUser.isDeleted) {
         if (existingUser.email === normalizedEmail) {
           return res.status(400).json({ message: "Email already exists" });
         }
 
-        if (existingUser.phoneNumber === phoneNumber) {
+        // Only a real, matching phone number counts as a collision — two
+        // accounts that both simply omit a phone number are not a duplicate.
+        if (phoneNumber && existingUser.phoneNumber === phoneNumber) {
           return res.status(400).json({ message: "Phone number already exists" });
         }
       }
@@ -36,7 +36,9 @@ const handleRegister = async (req, res) => {
         existingUser.deletedAt = null;
         existingUser.firstName = firstName;
         existingUser.lastName = lastName;
-        existingUser.phoneNumber = phoneNumber;
+        // Only overwrite if a new one was actually provided — otherwise
+        // leave whatever phone number was already on the account alone.
+        if (phoneNumber) existingUser.phoneNumber = phoneNumber;
         existingUser.hashPass = hashedPassword;
 
         await existingUser.save();

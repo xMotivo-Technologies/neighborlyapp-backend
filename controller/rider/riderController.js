@@ -23,6 +23,13 @@ const applyAsRider = async (req, res) => {
     return res.status(400).json({ message: "nin is required for on-foot riders" });
   }
 
+  // phoneNumber is optional on the User account in general, but a buyer
+  // needs to be able to call their rider mid-delivery, so it's required
+  // here even though it isn't enforced at registration anymore.
+  if (!req.user.phoneNumber) {
+    return res.status(400).json({ message: "Add a phone number to your profile before applying as a rider" });
+  }
+
   try {
     let rider = await RiderModel.findOne({ user: req.user._id });
 

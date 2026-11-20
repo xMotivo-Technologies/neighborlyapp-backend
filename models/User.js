@@ -8,10 +8,17 @@ const userSchema = new Schema(
       required: true,
       unique: true,
     },
+    // Optional — a buyer/vendor account doesn't need one. sparse so the
+    // unique index only applies to documents that actually have a value;
+    // without sparse, every user who omits it would collide on Mongo's
+    // shared "missing field" null, and only the first phoneless signup
+    // would succeed. Riders are still required to have one (enforced in
+    // applyAsRider, not here) since buyers call their rider by phone
+    // mid-delivery.
     phoneNumber: {
       type: String,
-      required: true,
       unique: true,
+      sparse: true,
       trim: true,
     },
 

@@ -31,11 +31,17 @@ const updateProfile = async (req, res) => {
     }
 
     if (phoneNumber !== undefined && phoneNumber !== user.phoneNumber) {
-      const existingPhone = await UserModel.findOne({ phoneNumber, _id: { $ne: user._id } });
-      if (existingPhone) {
-        return res.status(400).json({ message: "Phone number already in use" });
+      if (phoneNumber) {
+        const existingPhone = await UserModel.findOne({ phoneNumber, _id: { $ne: user._id } });
+        if (existingPhone) {
+          return res.status(400).json({ message: "Phone number already in use" });
+        }
+        user.phoneNumber = phoneNumber;
+      } else {
+        // Clearing it — no collision check needed, and unsetting (rather
+        // than storing "") keeps it out of the sparse unique index entirely.
+        user.phoneNumber = undefined;
       }
-      user.phoneNumber = phoneNumber;
     }
 
     if (firstName !== undefined) user.firstName = firstName;
