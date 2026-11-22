@@ -2,7 +2,13 @@ const UserModel = require("../../models/User");
 const bcrypt = require("bcrypt");
 
 const handleRegister = async (req, res) => {
-  const { email, phoneNumber, password, firstName, lastName } = req.body;
+  const { email, password, firstName, lastName } = req.body;
+  // "" (a blank form field) must be treated the same as omitting the field
+  // entirely — phoneNumber's unique index is sparse, which only excludes
+  // documents where the field is truly missing, not ones storing "". Two
+  // users both submitting "" would otherwise collide on it just like two
+  // nulls used to before the index became sparse.
+  const phoneNumber = req.body.phoneNumber || undefined;
 
   const normalizedEmail = email.toLowerCase().trim();
 
