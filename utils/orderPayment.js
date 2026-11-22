@@ -2,6 +2,9 @@ const OrderModel = require("../models/Order");
 const { verifyTransaction } = require("./paystack");
 const { createDeliveryForOrder } = require("../controller/delivery/deliveryController");
 const { notify, broadcastToRiders, TEMPLATES } = require("../services/notificationService");
+const { sendTemplateMail } = require("./emails/sendTemplateMail");
+const paymentConfirmedMail = require("./emails/paymentConfirmedMail");
+const newOrderMail = require("./emails/newOrderMail");
 
 /**
  * Shared, idempotent order payment finalizer.
@@ -107,12 +110,23 @@ const finalizeOrderPayment = async ({ paymentReference, transactionData }) => {
           template: TEMPLATES.PAYMENT_CONFIRMED(),
           data: { orderId: updatedOrder._id.toString(), audience: "buyer" },
         });
+        sendTemplateMail({
+          recipientId: updatedOrder.buyer,
+          mailFn: paymentConfirmedMail,
+          orderId: updatedOrder._id.toString(),
+          totalAmount: updatedOrder.totalAmount,
+        });
 
         // Notify Vendor of new customer order
         notify({
           recipientId: updatedOrder.vendor,
           template: TEMPLATES.NEW_ORDER_VENDOR(),
           data: { orderId: updatedOrder._id.toString(), audience: "vendor" },
+        });
+        sendTemplateMail({
+          recipientId: updatedOrder.vendor,
+          mailFn: newOrderMail,
+          orderId: updatedOrder._id.toString(),
         });
 
         // Broadcast to nearby available riders

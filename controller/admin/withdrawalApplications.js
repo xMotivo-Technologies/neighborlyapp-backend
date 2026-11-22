@@ -5,6 +5,10 @@ const { applyWalletEntry } = require("../../utils/walletLedger");
 const { createTransferRecipient, initiateTransfer, verifyTransferByReference } = require("../../utils/paystack");
 const { resolveUserIdForRider } = require("../../utils/riderHelper");
 const { notify, TEMPLATES } = require("../../services/notificationService");
+const { sendTemplateMail } = require("../../utils/emails/sendTemplateMail");
+const withdrawalApprovedMail = require("../../utils/emails/withdrawalApprovedMail");
+const withdrawalRejectedMail = require("../../utils/emails/withdrawalRejectedMail");
+const withdrawalFailedMail = require("../../utils/emails/withdrawalFailedMail");
 
 const listWithdrawals = async (req, res) => {
   try {
@@ -97,6 +101,7 @@ const approveWithdrawal = async (req, res) => {
         withdrawal.status = "failed";
         withdrawal.failureReason = recipientError.message;
         await withdrawal.save();
+        sendTemplateMail({ recipientId: rider.user, mailFn: withdrawalFailedMail, amount: withdrawal.amount });
         return res
           .status(502)
           .json({ message: "Unable to set up payout recipient, withdrawal reversed", withdrawal });
@@ -138,6 +143,7 @@ const approveWithdrawal = async (req, res) => {
         withdrawal.reviewedBy = req.admin._id;
         withdrawal.reviewedAt = new Date();
         await withdrawal.save();
+        sendTemplateMail({ recipientId: rider.user, mailFn: withdrawalApprovedMail, amount: withdrawal.amount });
         return res.status(200).json({ message: "Withdrawal approved", withdrawal });
       }
 
@@ -155,6 +161,7 @@ const approveWithdrawal = async (req, res) => {
       withdrawal.status = "failed";
       withdrawal.failureReason = transferError.message;
       await withdrawal.save();
+      sendTemplateMail({ recipientId: rider.user, mailFn: withdrawalFailedMail, amount: withdrawal.amount });
       return res.status(502).json({ message: "Unable to initiate transfer, withdrawal reversed", withdrawal });
     }
 
@@ -175,6 +182,7 @@ const approveWithdrawal = async (req, res) => {
           template: TEMPLATES.RIDER_WITHDRAWAL_APPROVED(),
           data: { withdrawalId: withdrawal._id.toString(), audience: "rider" },
         });
+        sendTemplateMail({ recipientId: riderUserId, mailFn: withdrawalApprovedMail, amount: withdrawal.amount });
       }
 
       return res.status(200).json({ message: "Withdrawal approved and transfer completed", withdrawal });
@@ -235,6 +243,7 @@ const rejectWithdrawal = async (req, res) => {
         template: TEMPLATES.RIDER_WITHDRAWAL_REJECTED(reason),
         data: { withdrawalId: withdrawal._id.toString(), reason, audience: "rider" },
       });
+      sendTemplateMail({ recipientId: riderUserId, mailFn: withdrawalRejectedMail, amount: withdrawal.amount, reason });
     }
 
     return res.status(200).json({ message: "Withdrawal rejected and funds returned to wallet", withdrawal });

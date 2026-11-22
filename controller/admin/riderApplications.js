@@ -1,6 +1,8 @@
 const RiderModel = require("../../models/Rider");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { notify, TEMPLATES } = require("../../services/notificationService");
+const { sendTemplateMail } = require("../../utils/emails/sendTemplateMail");
+const riderApplicationApprovedMail = require("../../utils/emails/riderApplicationApprovedMail");
 
 const listRiders = async (req, res) => {
   try {
@@ -63,6 +65,7 @@ const approveRider = async (req, res) => {
       template: TEMPLATES.RIDER_APPLICATION_APPROVED(),
       data: { riderId: rider._id.toString(), audience: "rider" },
     });
+    sendTemplateMail({ recipientId: rider.user, mailFn: riderApplicationApprovedMail });
 
     return res.status(200).json({ message: "Rider approved", rider });
   } catch (error) {

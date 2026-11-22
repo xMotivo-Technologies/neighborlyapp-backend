@@ -1,6 +1,9 @@
 const UserModel = require("../../models/User");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { notify, TEMPLATES } = require("../../services/notificationService");
+const { sendTemplateMail } = require("../../utils/emails/sendTemplateMail");
+const vendorApplicationApprovedMail = require("../../utils/emails/vendorApplicationApprovedMail");
+const vendorApplicationRejectedMail = require("../../utils/emails/vendorApplicationRejectedMail");
 
 const listPendingVendors = async (req, res) => {
   try {
@@ -68,6 +71,7 @@ const approveVendor = async (req, res) => {
       template: TEMPLATES.VENDOR_APPLICATION_APPROVED(),
       data: { vendorId: user._id.toString(), audience: "vendor" },
     });
+    sendTemplateMail({ recipientId: user._id, mailFn: vendorApplicationApprovedMail });
 
     return res.status(200).json({
       message: "Vendor application approved",
@@ -108,6 +112,7 @@ const rejectVendor = async (req, res) => {
       template: TEMPLATES.VENDOR_APPLICATION_REJECTED(),
       data: { vendorId: user._id.toString(), audience: "vendor" },
     });
+    sendTemplateMail({ recipientId: user._id, mailFn: vendorApplicationRejectedMail });
 
     return res.status(200).json({
       message: "Vendor application rejected",

@@ -4,6 +4,9 @@ const ProductModel = require("../../models/Products");
 const { getPagination, buildPaginationMeta } = require("../../utils/pagination");
 const { sendPasswordResetOtp } = require("../auth/resetPasswordController");
 const { notify, TEMPLATES } = require("../../services/notificationService");
+const { sendTemplateMail } = require("../../utils/emails/sendTemplateMail");
+const accountSuspendedMail = require("../../utils/emails/accountSuspendedMail");
+const accountBannedMail = require("../../utils/emails/accountBannedMail");
 
 const listUsers = async (req, res) => {
   try {
@@ -84,6 +87,7 @@ const suspendUser = async (req, res) => {
       template: TEMPLATES.ACCOUNT_SUSPENDED(),
       data: { audience: "buyer" },
     });
+    sendTemplateMail({ recipientId: user._id, mailFn: accountSuspendedMail, reason });
 
     return res.status(200).json({ message: "User suspended", user });
   } catch (error) {
@@ -144,6 +148,10 @@ const banUser = async (req, res) => {
     user.banReason = reason;
     user.refreshToken = null;
     await user.save();
+
+    // No push notification exists for a ban today (unlike suspend) — email
+    // is the only notification this action sends.
+    sendTemplateMail({ recipientId: user._id, mailFn: accountBannedMail, reason });
 
     return res.status(200).json({ message: "User banned", user });
   } catch (error) {
