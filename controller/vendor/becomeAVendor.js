@@ -1,7 +1,7 @@
 const UserModel = require("../../models/User");
 
 const becomeAVendor = async (req, res) => {
-  const { businessName, businessAddress, storeDescription } = req.body;
+  const { businessName, businessAddress, storeDescription, phoneNumber } = req.body;
 
   if (!businessName || !businessAddress) {
     return res.status(400).json({
@@ -26,6 +26,22 @@ const becomeAVendor = async (req, res) => {
       });
     }
 
+    // phoneNumber is optional for a plain buyer account, but a vendor needs
+    // to be reachable — accepted directly on the application (rather than
+    // requiring a separate PATCH /profile call first) so a buyer with no
+    // phone yet can supply one in this same request.
+    if (phoneNumber && phoneNumber !== user.phoneNumber) {
+      const existingPhone = await UserModel.findOne({ phoneNumber, _id: { $ne: user._id } });
+      if (existingPhone) {
+        return res.status(400).json({ message: "Phone number already in use" });
+      }
+      user.phoneNumber = phoneNumber;
+    }
+
+    if (!user.phoneNumber) {
+      return res.status(400).json({ message: "phoneNumber is required to apply as a vendor" });
+    }
+
     user.businessName = businessName;
     user.businessAddress = businessAddress;
     user.storeDescription = storeDescription;
@@ -41,6 +57,7 @@ const becomeAVendor = async (req, res) => {
         businessName: user.businessName,
         businessAddress: user.businessAddress,
         storeDescription: user.storeDescription,
+        phoneNumber: user.phoneNumber,
       },
     });
   } catch (error) {
