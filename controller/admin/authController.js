@@ -72,10 +72,18 @@ const handleAdminLogin = async (req, res) => {
       expiresIn: "12h",
     });
 
+    // The admin dashboard is served from a different domain than this API
+    // (e.g. neighborly.ng vs the onrender.com API host), so every call after
+    // login is a cross-site fetch. sameSite:"lax" withholds the cookie on
+    // those (it only rides along on top-level navigations), which is exactly
+    // why login succeeds but every endpoint after it 401s. Cross-site cookies
+    // require sameSite:"none" paired with secure:true — Render is HTTPS-only
+    // regardless of NODE_ENV, so secure is hardcoded true rather than
+    // depending on an env var that may not be set.
     res.cookie("adminToken", adminToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 12 * 60 * 60 * 1000,
     });
 
@@ -94,7 +102,10 @@ const handleAdminLogin = async (req, res) => {
 };
 
 const handleAdminLogout = async (req, res) => {
-  res.clearCookie("adminToken");
+  // Must match the attributes the cookie was actually set with (secure/
+  // sameSite) — a mismatched clearCookie call can silently fail to remove
+  // it in some browsers.
+  res.clearCookie("adminToken", { httpOnly: true, secure: true, sameSite: "none" });
   return res.status(200).json({ message: "Logged out successfully" });
 };
 
